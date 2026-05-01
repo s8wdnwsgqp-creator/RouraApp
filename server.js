@@ -597,13 +597,13 @@ app.get('/api/buscar-pedido', requireAuth, async (req, res) => {
       if (cellA === numeroPedido) {
         const row = rows[i];
         found = {
-          SIE:        String(row[2]  || '').trim(),
-          RefCli:     String(row[10] || '').trim(),
-          PA:         String(row[12] || '').trim(),
-          Ciudad:     String(row[13] || '').trim(),
-          Direccion:  String(row[14] || '').trim(),
-          Provincia:  String(row[15] || '').trim(),
-          Descripcion: String(row[24] || '').trim(),
+          SIE:        String(row[1]  || '').trim(),  // Columna B
+          RefCli:     String(row[2]  || '').trim(),  // Columna C
+          PA:         String(row[4]  || '').trim(),  // Columna E
+          Ciudad:     String(row[5]  || '').trim(),  // Columna F
+          Direccion:  String(row[6]  || '').trim(),  // Columna G
+          Provincia:  String(row[7]  || '').trim(),  // Columna H
+          Descripcion: String(row[8] || '').trim(),  // Columna I
         };
         break;
       }
