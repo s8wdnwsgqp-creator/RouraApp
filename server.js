@@ -1202,18 +1202,22 @@ async function generarCertificacion({ pedido, datosExcel, fechaHora, operario, f
       if (albaranPdfBuf) {
         try {
           // Calcular en qué página va la portada de sección 3.
-          // Estructura: portada(1) + sec1_cover+páginas + sec2_cover+páginas_antes
-          //             + sec3_cover(1) + sec4_cover+páginas_final
-          // Contamos: 1 + (1+fotosAntesBufs.length||1) + sec3_cover = 3 + fotosAntes_len
-          // Simplificamos: cargamos el certBuf con pdf-lib para saber el total
-          // y buscamos la portada de sec3 = total_páginas - (1 + págs_sec4)
-          // = total - 1 - (fotosFinalBufs.length || 1)
-          const tmpDoc    = await LibPDFDoc.load(certBuf);
-          const totalPags = tmpDoc.getPageCount();
-          const paginasSec4 = 1 + (fotosFinalBufs.length > 0 ? fotosFinalBufs.length : 1);
-          const insertAfter = totalPags - paginasSec4 - 1; // índice 0-based de sec3 cover
+          // Estructura fija del PDF generado por PDFKit (índices base-0):
+          //   0          → Portada (datos instalación)
+          //   1          → Portada sec2 (Fotos Antes)
+          //   2..X       → Fotos Antes (o 1 página "sin fotos" si no hay ninguna)
+          //   X+1        → Portada sec3 (Albarán) ← aquí insertamos
+          //   X+2        → Portada sec4 (Fotos Final)
+          //   X+3..fin   → Fotos Final (o 1 página "sin fotos")
+          //
+          // pagsSec2 = 1 (cover) + N_fotos_antes (mínimo 1 si no hay fotos)
+          // insertAfter = índice de sec3_cover = 1 (portada) + pagsSec2
+          const pagsSec2    = 1 + (fotosAntesBufs.length > 0 ? fotosAntesBufs.length : 1);
+          const insertAfter = 1 + pagsSec2; // índice 0-based de la portada de sec3
+          const tmpDoc      = await LibPDFDoc.load(certBuf);
+          const totalPags   = tmpDoc.getPageCount();
           console.log('[pdf-lib] total pags certKit:', totalPags,
-            '| pags sec4:', paginasSec4, '| insertar después de página:', insertAfter);
+            '| pags sec2:', pagsSec2, '| insertar después de página (sec3 cover idx):', insertAfter);
           certBuf = await mergeCertConAlbaran(certBuf, albaranPdfBuf, insertAfter);
         } catch (eMerge) {
           console.error('[pdf-lib] Fallo en fusión — se entrega certificación sin albarán embebido:', eMerge.message);
