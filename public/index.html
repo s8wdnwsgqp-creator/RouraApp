@@ -360,9 +360,49 @@ tr:hover .dld-btn{opacity:1}
 ::-webkit-scrollbar-track{background:var(--bg)}
 ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px}
 ::-webkit-scrollbar-thumb:hover{background:var(--brand)}
+
+/* ── MODAL PERMISOS ────────────────────────────────────────── */
+#permModal{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(5,12,25,0.92);backdrop-filter:blur(8px);padding:20px;}
+#permModal.hidden{display:none;}
+.perm-card{background:linear-gradient(145deg,#0d1f3c,#0a1628);border:1px solid rgba(27,108,168,0.35);border-radius:20px;padding:36px 32px 28px;max-width:400px;width:100%;text-align:center;box-shadow:0 24px 80px rgba(0,0,0,0.6),0 0 0 1px rgba(27,108,168,0.1);}
+.perm-logo{width:72px;height:72px;object-fit:contain;margin:0 auto 16px;display:block;filter:drop-shadow(0 4px 16px rgba(27,108,168,0.4));}
+.perm-title{font-size:20px;font-weight:800;color:#fff;margin-bottom:8px;letter-spacing:-0.3px;}
+.perm-sub{font-size:13px;color:rgba(200,215,235,0.7);margin-bottom:24px;line-height:1.55;}
+.perm-list{background:rgba(27,108,168,0.08);border:1px solid rgba(27,108,168,0.18);border-radius:12px;padding:14px 18px;margin-bottom:24px;text-align:left;}
+.perm-item{display:flex;align-items:center;gap:10px;padding:5px 0;font-size:12.5px;color:rgba(200,220,245,0.85);}
+.perm-item span.ico{font-size:16px;flex-shrink:0;}
+.perm-btns{display:flex;gap:10px;}
+.perm-btn-yes{flex:1;padding:13px;background:linear-gradient(135deg,#1B6CA8,#145a8f);color:#fff;border:none;border-radius:11px;font-size:14px;font-weight:700;cursor:pointer;transition:all .2s;box-shadow:0 4px 20px rgba(27,108,168,0.4);}
+.perm-btn-yes:hover{background:linear-gradient(135deg,#2278b8,#1B6CA8);transform:translateY(-1px);}
+.perm-btn-no{flex:1;padding:13px;background:rgba(255,255,255,0.05);color:rgba(200,215,235,0.6);border:1px solid rgba(255,255,255,0.1);border-radius:11px;font-size:13px;font-weight:500;cursor:pointer;transition:all .2s;}
+.perm-btn-no:hover{background:rgba(255,255,255,0.08);}
+.perm-note{font-size:10.5px;color:rgba(150,170,200,0.45);margin-top:14px;line-height:1.5;}
 </style>
 </head>
 <body>
+
+<!-- ═══════════════ MODAL PERMISOS ═══════════════ -->
+<div id="permModal" class="hidden">
+  <div class="perm-card">
+    <img id="permLogoImg" class="perm-logo" alt="R&C"/>
+    <div class="perm-title">Bienvenido a R&amp;C Gestión</div>
+    <div class="perm-sub">Para ofrecerte la mejor experiencia, la aplicación necesita acceso a los siguientes recursos de tu dispositivo:</div>
+    <div class="perm-list">
+      <div class="perm-item"><span class="ico">📍</span><span>Ubicación y geolocalización (incluso en segundo plano)</span></div>
+      <div class="perm-item"><span class="ico">📷</span><span>Cámara para capturar fotografías</span></div>
+      <div class="perm-item"><span class="ico">🎤</span><span>Micrófono para dictado de texto</span></div>
+      <div class="perm-item"><span class="ico">🖼️</span><span>Galería y almacenamiento de imágenes</span></div>
+      <div class="perm-item"><span class="ico">🔔</span><span>Notificaciones del sistema</span></div>
+    </div>
+    <div class="perm-btns">
+      <button class="perm-btn-yes" onclick="acceptPermissions()">✓ Sí, permitir acceso</button>
+      <button class="perm-btn-no" onclick="declinePermissions()">Ahora no</button>
+    </div>
+    <div class="perm-note">Puedes cambiar estos permisos en cualquier momento desde la configuración de tu navegador o dispositivo.</div>
+  </div>
+</div>
+
+
 
 <!-- ═══════════════ LOGIN ═══════════════ -->
 <div id="loginScreen">
@@ -1100,6 +1140,9 @@ tr:hover .dld-btn{opacity:1}
     const card=ls.querySelector('.login-card');
     if(card)card.style.zIndex='10';
   }
+  // Logo en modal de permisos
+  const pmLogo=document.getElementById('permLogoImg');
+  if(pmLogo&&typeof LOGO_B64!=='undefined'&&LOGO_B64)pmLogo.src=LOGO_B64;
 })();
 
 const API=window.location.origin;
@@ -1186,6 +1229,73 @@ async function doLogout(){
   try{await authFetch('/api/auth/logout',{method:'POST'});}catch(_){}
   token=null;currentUser=null;sessionStorage.clear();window.location.reload();
 }
+// ── PERMISOS ─────────────────────────────────────────────────
+const PERM_KEY = 'rc_perms_granted';
+
+async function requestAllPermissions(){
+  const results = {};
+  // Geolocalización
+  try{
+    await new Promise((ok,fail)=>
+      navigator.geolocation.getCurrentPosition(ok, fail, {enableHighAccuracy:true,timeout:10000})
+    );
+    results.geo = 'granted';
+  }catch(e){ results.geo = 'denied'; }
+
+  // Cámara + micrófono
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({video:true, audio:true});
+    stream.getTracks().forEach(t=>t.stop());
+    results.camera = 'granted'; results.mic = 'granted';
+  }catch(e){ results.camera = 'denied'; results.mic = 'denied'; }
+
+  // Notificaciones
+  if('Notification' in window){
+    try{
+      const r = await Notification.requestPermission();
+      results.notif = r;
+    }catch(e){ results.notif = 'denied'; }
+  }
+
+  // Persistencia (para PWA background)
+  if(navigator.storage && navigator.storage.persist){
+    try{ await navigator.storage.persist(); }catch(_){}
+  }
+
+  console.log('[perms] Results:', results);
+  return results;
+}
+
+function showPermModal(){
+  const m=document.getElementById('permModal');
+  if(m) m.classList.remove('hidden');
+}
+function hidePermModal(){
+  const m=document.getElementById('permModal');
+  if(m) m.classList.add('hidden');
+}
+
+async function acceptPermissions(){
+  hidePermModal();
+  localStorage.setItem(PERM_KEY,'1');
+  try{ await requestAllPermissions(); }catch(_){}
+}
+
+function declinePermissions(){
+  hidePermModal();
+  // Guardamos que ya se mostró para no repetirlo en cada recarga
+  localStorage.setItem(PERM_KEY,'0');
+}
+
+// Mostrar modal solo si nunca se ha respondido (ni sí ni no) en este dispositivo
+(function checkFirstVisit(){
+  const answered = localStorage.getItem(PERM_KEY);
+  if(answered === null){
+    // Pequeño delay para que el DOM cargue visualmente
+    setTimeout(showPermModal, 400);
+  }
+})();
+
 (function restore(){
   const t=sessionStorage.getItem('ftpToken');
   const u=sessionStorage.getItem('ftpUser');
@@ -1204,22 +1314,49 @@ async function sendPing(){
 }
 
 // ── GEO ──────────────────────────────────────────────────────
+let _geoWatchId = null;
+let _geoHideTimer = null;
+
 function initGeo(){
   const banner=document.getElementById('geoBanner'),txt=document.getElementById('geoText');
   if(!navigator.geolocation){banner.className='geo-banner err';txt.textContent='⚠ Geolocalización no disponible';return;}
-  navigator.geolocation.getCurrentPosition(pos=>{
+
+  // Parar watch anterior si existe
+  if(_geoWatchId !== null){navigator.geolocation.clearWatch(_geoWatchId);_geoWatchId=null;}
+
+  banner.className='geo-banner loading';
+  txt.textContent='Obteniendo ubicación del dispositivo...';
+
+  // watchPosition: actualiza ubicación continuamente, incluso en segundo plano
+  _geoWatchId = navigator.geolocation.watchPosition(pos=>{
     const lat=pos.coords.latitude.toFixed(6),lng=pos.coords.longitude.toFixed(6),acc=Math.round(pos.coords.accuracy);
+    const updated = !geoData || geoData.lat!==lat || geoData.lng!==lng;
     geoData={lat,lng,accuracy:acc,timestamp:new Date().toISOString()};
+    banner.style.display='';banner.style.opacity='1';
     banner.className='geo-banner';
-    txt.innerHTML=`📍 Ubicación confirmada · Lat: ${lat} · Lon: ${lng} · ±${acc}m`;
-    setTimeout(()=>{banner.style.opacity='0';setTimeout(()=>banner.style.display='none',400);},6000);
-    sendPing();
+    txt.innerHTML=`📍 ${lat}, ${lng} · ±${acc}m`;
+    if(updated){
+      sendPing();
+      if(_geoHideTimer)clearTimeout(_geoHideTimer);
+      _geoHideTimer=setTimeout(()=>{banner.style.opacity='0';setTimeout(()=>{banner.style.display='none';},400);},5000);
+    }
   },err=>{
+    banner.style.display='';banner.style.opacity='1';
     banner.className='geo-banner err';
     const m={1:'Permiso de ubicación denegado',2:'Posición no disponible',3:'Tiempo de espera agotado'};
     txt.textContent='⚠ '+(m[err.code]||'Error de geolocalización');
     geoData=null;
-  },{enableHighAccuracy:true,timeout:15000,maximumAge:0});
+  },{enableHighAccuracy:true,timeout:30000,maximumAge:15000});
+
+  // Enviar posición también cuando la página vuelve a primer plano (visibilitychange)
+  document.removeEventListener('visibilitychange', _onVisibilityGeo);
+  document.addEventListener('visibilitychange', _onVisibilityGeo);
+}
+
+function _onVisibilityGeo(){
+  if(document.visibilityState==='visible' && geoData){
+    sendPing();
+  }
 }
 
 // ── NAV ──────────────────────────────────────────────────────
