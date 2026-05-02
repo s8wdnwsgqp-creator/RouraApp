@@ -466,10 +466,17 @@ app.post('/api/upload-batch', requireAuth, upload.array('files', 20), async (req
       try {
         const dirPteCert = path.posix.join(BASE_PATH, 'Fotografias Pte Certificacion');
         await ensureDir(client, dirPteCert);
-        await client.uploadFrom(Readable.from(zipBuffer), path.posix.join(dirPteCert, zipName));
-        console.log('[upload-batch] Copia en Fotografias Pte Certificacion:', zipName);
+        const labelCert = cat === 'fotos_antes' ? 'Fotografias_Antes' : 'Fotografias_Final';
+        const tsPteCert = tsNombre(req.user.id || '');
+        for (let idx = 0; idx < entries.length; idx++) {
+          const entry = entries[idx];
+          const ext   = path.extname(entry.name) || '.jpg';
+          const imgName = `${String(pedido).trim()}_${tsPteCert}_${labelCert}_${String(idx + 1).padStart(3, '0')}${ext}`;
+          await client.uploadFrom(Readable.from(entry.buffer), path.posix.join(dirPteCert, imgName));
+          console.log('[upload-batch] Imagen en Fotografias Pte Certificacion:', imgName);
+        }
       } catch (eCert) {
-        console.warn('[upload-batch] No se pudo copiar a Fotografias Pte Certificacion:', eCert.message);
+        console.warn('[upload-batch] No se pudo copiar imágenes a Fotografias Pte Certificacion:', eCert.message);
       }
     }
 
@@ -567,26 +574,31 @@ app.post('/api/albaran', requireAuth, async (req, res) => {
         } catch (eList) {
           console.warn('[cert] No se pudo listar Fotografias Pte Certificacion:', eList.message);
         }
-        const zipsDePedido = listPte.filter(f =>
+        // Archivos del pedido: ZIPs legacy y también imágenes directas
+        const archivosPedido = listPte.filter(f =>
           f.type !== 2 &&
-          /\.zip$/i.test(f.name) &&
           (f.name.startsWith(pedidoStr + '_') || f.name.startsWith(pedidoStr + ' '))
         );
-        console.log('[cert] ZIPs encontrados para pedido', pedidoStr, ':', zipsDePedido.map(z => z.name));
+        const zipsDePedido   = archivosPedido.filter(f => /\.zip$/i.test(f.name));
+        const imgsDePedido   = archivosPedido.filter(f => esImagen(f.name));
+        console.log('[cert] Archivos encontrados para pedido', pedidoStr,
+          '— ZIPs:', zipsDePedido.map(z => z.name),
+          '— Imágenes directas:', imgsDePedido.map(i => i.name));
 
-        // ── 3. Descargar y clasificar los ZIPs ────────────────────────────────────
+        // ── 3. Descargar y clasificar archivos del pedido ─────────────────────────
         const fotosAntesBufs = [];
         const fotosFinalBufs = [];
         const albaranBuf     = pdfBuffer; // albarán ya en memoria, no hace falta descargarlo
 
+        // 3a. Procesar ZIPs (compatibilidad con versiones anteriores)
         for (const zipFile of zipsDePedido) {
           if (/Albaran_Final_Trabajo/i.test(zipFile.name)) {
             console.log('[cert] Albarán ZIP omitido (buffer en memoria):', zipFile.name);
             continue;
           }
           try {
-            await goTo(DIR_PTE_CERT);                    // aseguramos directorio actual
-            const zipBuf = await downloadFile(zipFile.name);  // solo nombre de archivo
+            await goTo(DIR_PTE_CERT);
+            const zipBuf = await downloadFile(zipFile.name);
 
             const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cert_'));
             try {
@@ -608,6 +620,21 @@ app.post('/api/albaran', requireAuth, async (req, res) => {
             }
           } catch (eZip) {
             console.warn('[cert] Error extrayendo ZIP', zipFile.name, ':', eZip.message);
+          }
+        }
+
+        // 3b. Procesar imágenes directas (nuevo comportamiento)
+        for (const imgFile of imgsDePedido.sort((a, b) => a.name.localeCompare(b.name))) {
+          if (/Albaran_Final_Trabajo/i.test(imgFile.name)) continue;
+          try {
+            await goTo(DIR_PTE_CERT);
+            const buf = await downloadFile(imgFile.name);
+            const esAntes = /Fotografias_Antes/i.test(imgFile.name);
+            if (esAntes) fotosAntesBufs.push({ name: imgFile.name, buf });
+            else         fotosFinalBufs.push({ name: imgFile.name, buf });
+            console.log('[cert] Imagen directa', imgFile.name, '(', esAntes ? 'ANTES' : 'FINAL', ')');
+          } catch (eImg) {
+            console.warn('[cert] Error descargando imagen directa', imgFile.name, ':', eImg.message);
           }
         }
         console.log('[cert] Fotos antes:', fotosAntesBufs.length, '| Fotos final:', fotosFinalBufs.length, '| Albarán OK:', !!albaranBuf);
@@ -633,7 +660,7 @@ app.post('/api/albaran', requireAuth, async (req, res) => {
           const listFinal = await clientCert.list();
           const aEliminar = listFinal.filter(f =>
             f.type !== 2 &&
-            /\.zip$/i.test(f.name) &&
+            (/\.zip$/i.test(f.name) || esImagen(f.name)) &&
             (f.name.startsWith(pedidoStr + '_') || f.name.startsWith(pedidoStr + ' '))
           );
           for (const zf of aEliminar) {
@@ -2177,13 +2204,21 @@ app.post('/api/upload-fotos-b64', requireAuth, async (req, res) => {
     await ensureDir(client, tDir);
     await client.uploadFrom(Readable.from(zipBuffer), path.posix.join(tDir, zipName));
 
-    // Si son fotos de antes o final, subir también a "Fotografias Pte Certificacion"
+    // Si son fotos de antes o final, subir imágenes individuales a "Fotografias Pte Certificacion"
     if (esFotosCertificacion) {
       try {
         await ensureDir(client, dirPteCert);
-        await client.uploadFrom(Readable.from(zipBuffer), path.posix.join(dirPteCert, zipName));
+        const labelCert = catStr === 'fotos_antes' ? 'Fotografias_Antes' : 'Fotografias_Final';
+        const tsPteCert = tsNombre(req.user.id || '');
+        for (let idx = 0; idx < entries.length; idx++) {
+          const entry = entries[idx];
+          const ext   = path.extname(entry.name) || '.jpg';
+          const imgName = `${String(pedido).trim()}_${tsPteCert}_${labelCert}_${String(idx + 1).padStart(3, '0')}${ext}`;
+          await client.uploadFrom(Readable.from(entry.buffer), path.posix.join(dirPteCert, imgName));
+          console.log('[upload-fotos-b64] Imagen en Fotografias Pte Certificacion:', imgName);
+        }
       } catch (eCert) {
-        console.warn('[upload-fotos-b64] No se pudo copiar a Fotografias Pte Certificacion:', eCert.message);
+        console.warn('[upload-fotos-b64] No se pudo copiar imágenes a Fotografias Pte Certificacion:', eCert.message);
       }
     }
 
