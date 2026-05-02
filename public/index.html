@@ -1144,7 +1144,7 @@ function showApp(){
   roleEl.textContent=isAdmin?'Admin':'Usuario';
   roleEl.className='tb-role '+(isAdmin?'role-admin':'role-user');
 
-  // Construir tarjetas según rol
+  // Construir tarjetas según nivel_acceso y rol
   const grid=document.getElementById('homeCards');
   grid.innerHTML='';
   function addCard(cls,ico,name,desc,action){
@@ -1153,18 +1153,26 @@ function showApp(){
     grid.appendChild(c);
   }
 
-  if(isAdmin){
-    // Admin ve todo
+  const nivelAcceso = (currentUser.nivel_acceso || '').toLowerCase().trim();
+  const esExterno   = nivelAcceso === 'externo';
+  const esInterno   = nivelAcceso === 'interno' || nivelAcceso === '';  // sin nivel = interno por defecto
+
+  if(esExterno){
+    // Nivel externo: solo Documentar Trabajos y CFO
+    addCard('c-green',  '📤', 'Documentar Trabajos', 'Sube documentos y fotos de trabajos',                          ()=>nav('cargar'));
+    addCard('c-purple', '🔍', 'CFO',                 'Visita CFO — Registro de incidencias y apertura de objeciones',()=>startFlujo('cfo'));
+  } else if(isAdmin){
+    // Nivel interno + admin: acceso completo
     addCard('c-blue',   '🗂️', 'Explorador FTP',      'Navega y descarga archivos del servidor',                     ()=>nav('explorer'));
-    addCard('c-green',  '📤', 'Documentar Trabajos',      'Sube documentos y fotos de trabajos',                         ()=>nav('cargar'));
+    addCard('c-green',  '📤', 'Documentar Trabajos', 'Sube documentos y fotos de trabajos',                         ()=>nav('cargar'));
     addCard('c-purple', '🔍', 'CFO',                  'Visita CFO — Registro de incidencias y apertura de objeciones',()=>startFlujo('cfo'));
     addCard('c-orange', '📋', 'Informe Visitas',       'Visitas de Liderazgo e Inspecciones de Seguridad',            ()=>nav('informeVisitas'));
     addCard('c-blue',   '🗺️', 'Mapa en Tiempo Real',  'Ubicación de usuarios conectados',                            ()=>nav('mapa'));
     addCard('c-gold',   '👥', 'Gestión de Usuarios',  'Crear y eliminar usuarios del sistema',                       ()=>nav('usuarios'));
     addCard('c-orange', '🚛', 'Expediciones',          'Registrar y fotografiar expediciones de pedidos',             ()=>startFlujo('expediciones'));
   } else {
-    // Usuario estándar: solo Documentar Trabajos, CFO, Mapa y Expediciones
-    addCard('c-green',  '📤', 'Documentar Trabajos',      'Sube documentos y fotos de trabajos',                         ()=>nav('cargar'));
+    // Nivel interno + usuario: todo menos Explorador FTP y Gestión de Usuarios
+    addCard('c-green',  '📤', 'Documentar Trabajos', 'Sube documentos y fotos de trabajos',                         ()=>nav('cargar'));
     addCard('c-purple', '🔍', 'CFO',                  'Visita CFO — Registro de incidencias y apertura de objeciones',()=>startFlujo('cfo'));
     addCard('c-orange', '📋', 'Informe Visitas',       'Visitas de Liderazgo e Inspecciones de Seguridad',            ()=>nav('informeVisitas'));
     addCard('c-blue',   '🗺️', 'Mapa en Tiempo Real',  'Ubicación de usuarios conectados',                            ()=>nav('mapa'));
