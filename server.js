@@ -9,9 +9,9 @@ const bcrypt   = require('bcryptjs');
 const jwt      = require('jsonwebtoken');
 const fs       = require('fs');
 const XLSX     = require('xlsx');
-const { execSync } = require('child_process');
 const os           = require('os');
 const archiver     = require('archiver');
+const AdmZip       = require('adm-zip');
 const { PDFDocument: LibPDFDoc } = require('pdf-lib');
 
 // ── CACHÉ EXCEL ──────────────────────────────────────────────────────────────
@@ -631,24 +631,19 @@ app.post('/api/albaran', requireAuth, async (req, res) => {
             await goTo(DIR_PTE_CERT);
             const zipBuf = await downloadFile(zipFile.name);
 
-            const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cert_'));
-            try {
-              const tmpZip = path.join(tmpDir, 'fotos.zip');
-              fs.writeFileSync(tmpZip, zipBuf);
-              execSync(`unzip -o "${tmpZip}" -d "${tmpDir}"`, { timeout: 60000 });
-              const esAntes = /Fotografias_Antes/i.test(zipFile.name);
-              const imgFiles = fs.readdirSync(tmpDir)
-                .filter(fn => fn !== 'fotos.zip' && esImagen(fn))
-                .sort();
-              for (const fn of imgFiles) {
-                const buf = fs.readFileSync(path.join(tmpDir, fn));
-                if (esAntes) fotosAntesBufs.push({ name: fn, buf });
-                else         fotosFinalBufs.push({ name: fn, buf });
-              }
-              console.log('[cert] ZIP', zipFile.name, '->', imgFiles.length, 'imgs (', esAntes ? 'ANTES' : 'FINAL', ')');
-            } finally {
-              try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+            // Extraer ZIP en memoria con adm-zip (sin depender del binario 'unzip' del sistema)
+            const zip     = new AdmZip(zipBuf);
+            const esAntes = /Fotografias_Antes/i.test(zipFile.name);
+            const entries = zip.getEntries()
+              .filter(e => !e.isDirectory && esImagen(e.entryName))
+              .sort((a, b) => a.entryName.localeCompare(b.entryName));
+            for (const entry of entries) {
+              const buf = entry.getData();
+              const fn  = path.basename(entry.entryName);
+              if (esAntes) fotosAntesBufs.push({ name: fn, buf });
+              else         fotosFinalBufs.push({ name: fn, buf });
             }
+            console.log('[cert] ZIP', zipFile.name, '->', entries.length, 'imgs (', esAntes ? 'ANTES' : 'FINAL', ')');
           } catch (eZip) {
             console.warn('[cert] Error extrayendo ZIP', zipFile.name, ':', eZip.message);
           }
@@ -1077,28 +1072,6 @@ app.post('/api/certificacion', requireAuth, async (req, res) => {
     client.close();
   }
 });
-
-// ── HELPER: convertir PDF a imágenes PNG con pdftoppm ────────
-async function pdfToImages(pdfBuffer) {
-  const tmpDir    = fs.mkdtempSync(path.join(os.tmpdir(), 'albaran_'));
-  const tmpPdf    = path.join(tmpDir, 'albaran.pdf');
-  const outPrefix = path.join(tmpDir, 'page');
-  const images    = [];
-  try {
-    fs.writeFileSync(tmpPdf, pdfBuffer);
-    // -r 150 = 150 dpi  (buen equilibrio calidad/tamaño en PDF final)
-    execSync(`pdftoppm -r 150 -png "${tmpPdf}" "${outPrefix}"`, { timeout: 60000 });
-    const files = fs.readdirSync(tmpDir)
-      .filter(f => f.startsWith('page') && f.endsWith('.png'))
-      .sort();
-    for (const f of files) {
-      images.push(fs.readFileSync(path.join(tmpDir, f)));
-    }
-  } finally {
-    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
-  }
-  return images;
-}
 
 // ── FUSIONAR PDF CERTIFICACION + PDF ALBARÁN usando pdf-lib ─────────────────
 // Inserta las páginas del albarán justo después de la portada de sección 3.
