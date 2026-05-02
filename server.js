@@ -516,35 +516,51 @@ app.post('/api/albaran', requireAuth, async (req, res) => {
         const dirCert    = path.posix.join(BASE_PATH, 'Certificacion Final Trabajo');
         const pedidoStr  = String(pedido).trim();
 
+        // ── Subir el albarán también a "Fotografias Pte Certificacion" como ZIP ──
+        try {
+          const albZipBuf  = await crearZipBuffer([{ name: pdfName, buffer: pdfBuffer }]);
+          const albZipName = `${pedidoStr}_${tsNombre(req.user.id || '')}_Albaran_Final_Trabajo.zip`;
+          await ensureDir(client, dirPteCert);
+          await client.uploadFrom(Readable.from(albZipBuf), path.posix.join(dirPteCert, albZipName));
+          console.log('[albaran] Albarán copiado a Fotografias Pte Certificacion:', albZipName);
+        } catch (eAlbCopy) {
+          console.warn('[albaran] No se pudo copiar el albarán a Fotografias Pte Certificacion:', eAlbCopy.message);
+        }
+
         // Listar archivos en la carpeta de espera y filtrar los de este pedido
+        // Los ZIPs se nombran como {pedido}_{ts}_... (separado por guión bajo)
         const listPte = await ftpListSafe(client, dirPteCert);
         const zipsDePedido = listPte.filter(f =>
           f.type !== 2 &&
           /\.zip$/i.test(f.name) &&
-          f.name.startsWith(pedidoStr + ' ')
+          (f.name.startsWith(pedidoStr + '_') || f.name.startsWith(pedidoStr + ' '))
         );
 
-        // Clasificar los ZIPs según si son "Antes" o "Final"
+        // Clasificar los ZIPs según si son "Antes", "Final" o "Albaran"
         const fotosAntesBufs = [];
         const fotosFinalBufs = [];
+        let   albaranBuf     = pdfBuffer; // usar el albarán recién generado por defecto
 
         for (const zipFile of zipsDePedido) {
+          // Ignorar el ZIP del albarán que acabamos de subir (ya lo tenemos en pdfBuffer)
+          if (/Albaran_Final_Trabajo/i.test(zipFile.name)) continue;
+
           try {
-            const zipBuf  = await ftpDownloadBuffer(client, path.posix.join(dirPteCert, zipFile.name));
-            // Extraer imágenes del ZIP en memoria con archiver (usamos unzip nativo vía tmp)
-            const tmpDir  = fs.mkdtempSync(path.join(os.tmpdir(), 'cert_'));
+            const zipBuf = await ftpDownloadBuffer(client, path.posix.join(dirPteCert, zipFile.name));
+            // Extraer archivos del ZIP en memoria usando unzip nativo vía tmp
+            const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cert_'));
             try {
               const tmpZip = path.join(tmpDir, 'fotos.zip');
               fs.writeFileSync(tmpZip, zipBuf);
               execSync(`unzip -o "${tmpZip}" -d "${tmpDir}"`, { timeout: 60000 });
-              const imgFiles = fs.readdirSync(tmpDir)
-                .filter(fn => esImagen(fn))
-                .sort();
               const esAntes = /Fotografias_Antes/i.test(zipFile.name);
-              for (const fn of imgFiles) {
+              const allFiles = fs.readdirSync(tmpDir).filter(fn => fn !== 'fotos.zip').sort();
+              for (const fn of allFiles) {
                 const buf = fs.readFileSync(path.join(tmpDir, fn));
-                if (esAntes) fotosAntesBufs.push({ name: fn, buf });
-                else         fotosFinalBufs.push({ name: fn, buf });
+                if (esImagen(fn)) {
+                  if (esAntes) fotosAntesBufs.push({ name: fn, buf });
+                  else         fotosFinalBufs.push({ name: fn, buf });
+                }
               }
             } finally {
               try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
@@ -553,6 +569,8 @@ app.post('/api/albaran', requireAuth, async (req, res) => {
             console.warn('[albaran] Error extrayendo ZIP', zipFile.name, eZip.message);
           }
         }
+
+        console.log('[albaran] Fotos antes:', fotosAntesBufs.length, '| Fotos final:', fotosFinalBufs.length, '| Albarán disponible:', !!albaranBuf);
 
         // Generar PDF de certificación incluyendo albarán recién generado + fotos
         const fechaHora = timestamp || new Date().toLocaleString('es-ES');
@@ -563,7 +581,7 @@ app.post('/api/albaran', requireAuth, async (req, res) => {
           operario:       req.user.name,
           fotosAntesBufs,
           fotosFinalBufs,
-          albaranBuf:     pdfBuffer   // el albarán que acabamos de generar
+          albaranBuf      // el albarán que acabamos de generar
         });
 
         // Subir la certificación
@@ -572,10 +590,17 @@ app.post('/api/albaran', requireAuth, async (req, res) => {
         const certName = `${pedidoStr}_${tsCert}_Certificacion_Final_Trabajo.pdf`;
         await client.uploadFrom(Readable.from(pdfCertBuf), path.posix.join(dirCert, certName));
 
-        // Eliminar de "Fotografias Pte Certificacion" los archivos utilizados
-        for (const zipFile of zipsDePedido) {
+        // Eliminar de "Fotografias Pte Certificacion" todos los archivos de este pedido (fotos + albarán)
+        const listPteFinal = await ftpListSafe(client, dirPteCert);
+        const todosZipsPedido = listPteFinal.filter(f =>
+          f.type !== 2 &&
+          /\.zip$/i.test(f.name) &&
+          (f.name.startsWith(pedidoStr + '_') || f.name.startsWith(pedidoStr + ' '))
+        );
+        for (const zipFile of todosZipsPedido) {
           try {
             await client.remove(path.posix.join(dirPteCert, zipFile.name));
+            console.log('[albaran] Eliminado de Fotografias Pte Certificacion:', zipFile.name);
           } catch (eDel) {
             console.warn('[albaran] No se pudo eliminar', zipFile.name, eDel.message);
           }
