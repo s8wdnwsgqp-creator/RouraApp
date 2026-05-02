@@ -511,43 +511,67 @@ app.post('/api/albaran', requireAuth, async (req, res) => {
 
     // ── Si es albarán final de instalación, generar Certificacion Final Trabajo ──
     if (tipo === 'instalacion') {
+      // Usamos un cliente FTP independiente para toda la lógica de certificación,
+      // evitando que los cd() de ensureDir corrompan el estado del cliente principal.
+      const clientCert = new ftp.Client(300000);
+      clientCert.ftp.verbose = false;
       try {
+        await clientCert.access(FTP_CONFIG);
+
         const dirPteCert = path.posix.join(BASE_PATH, 'Fotografias Pte Certificacion');
         const dirCert    = path.posix.join(BASE_PATH, 'Certificacion Final Trabajo');
         const pedidoStr  = String(pedido).trim();
 
-        // ── Subir el albarán también a "Fotografias Pte Certificacion" como ZIP ──
+        // ── 1. Subir el albarán a "Fotografias Pte Certificacion" como ZIP ──────
         try {
           const albZipBuf  = await crearZipBuffer([{ name: pdfName, buffer: pdfBuffer }]);
           const albZipName = `${pedidoStr}_${tsNombre(req.user.id || '')}_Albaran_Final_Trabajo.zip`;
-          await ensureDir(client, dirPteCert);
-          await client.uploadFrom(Readable.from(albZipBuf), path.posix.join(dirPteCert, albZipName));
-          console.log('[albaran] Albarán copiado a Fotografias Pte Certificacion:', albZipName);
+          await clientCert.cd(BASE_PATH);
+          await ensureDir(clientCert, dirPteCert);
+          await clientCert.uploadFrom(Readable.from(albZipBuf), path.posix.join(dirPteCert, albZipName));
+          console.log('[cert] Albarán copiado a Fotografias Pte Certificacion:', albZipName);
         } catch (eAlbCopy) {
-          console.warn('[albaran] No se pudo copiar el albarán a Fotografias Pte Certificacion:', eAlbCopy.message);
+          console.warn('[cert] No se pudo copiar albarán a Fotografias Pte Certificacion:', eAlbCopy.message);
         }
 
-        // Listar archivos en la carpeta de espera y filtrar los de este pedido
-        // Los ZIPs se nombran como {pedido}_{ts}_... (separado por guión bajo)
-        const listPte = await ftpListSafe(client, dirPteCert);
+        // ── 2. Listar ZIPs del pedido en Fotografias Pte Certificacion ──────────
+        let listPte = [];
+        try {
+          await clientCert.cd(dirPteCert);
+          listPte = await clientCert.list();
+        } catch (eList) {
+          console.warn('[cert] No se pudo listar Fotografias Pte Certificacion:', eList.message);
+        }
         const zipsDePedido = listPte.filter(f =>
           f.type !== 2 &&
           /\.zip$/i.test(f.name) &&
           (f.name.startsWith(pedidoStr + '_') || f.name.startsWith(pedidoStr + ' '))
         );
+        console.log('[cert] ZIPs encontrados para pedido', pedidoStr, ':', zipsDePedido.map(z => z.name));
 
-        // Clasificar los ZIPs según si son "Antes", "Final" o "Albaran"
+        // ── 3. Descargar y clasificar los ZIPs ──────────────────────────────────
         const fotosAntesBufs = [];
         const fotosFinalBufs = [];
-        let   albaranBuf     = pdfBuffer; // usar el albarán recién generado por defecto
+        const albaranBuf     = pdfBuffer; // ya disponible en memoria
 
         for (const zipFile of zipsDePedido) {
-          // Ignorar el ZIP del albarán que acabamos de subir (ya lo tenemos en pdfBuffer)
-          if (/Albaran_Final_Trabajo/i.test(zipFile.name)) continue;
-
+          // El albarán ya lo tenemos en pdfBuffer, no hace falta descargarlo
+          if (/Albaran_Final_Trabajo/i.test(zipFile.name)) {
+            console.log('[cert] Albarán ZIP omitido (usando buffer en memoria):', zipFile.name);
+            continue;
+          }
           try {
-            const zipBuf = await ftpDownloadBuffer(client, path.posix.join(dirPteCert, zipFile.name));
-            // Extraer archivos del ZIP en memoria usando unzip nativo vía tmp
+            // Posicionarse en la carpeta antes de cada descarga
+            await clientCert.cd(dirPteCert);
+            const pt2     = new PassThrough();
+            const chunks2 = [];
+            pt2.on('data', c => chunks2.push(c));
+            const done2 = new Promise((res2, rej2) => { pt2.on('end', res2); pt2.on('error', rej2); });
+            await clientCert.downloadTo(pt2, path.posix.join(dirPteCert, zipFile.name));
+            await done2;
+            const zipBuf = Buffer.concat(chunks2);
+
+            // Extraer en directorio temporal
             const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cert_'));
             try {
               const tmpZip = path.join(tmpDir, 'fotos.zip');
@@ -556,71 +580,70 @@ app.post('/api/albaran', requireAuth, async (req, res) => {
               const esAntes = /Fotografias_Antes/i.test(zipFile.name);
               const allFiles = fs.readdirSync(tmpDir).filter(fn => fn !== 'fotos.zip').sort();
               for (const fn of allFiles) {
+                if (!esImagen(fn)) continue;
                 const buf = fs.readFileSync(path.join(tmpDir, fn));
-                if (esImagen(fn)) {
-                  if (esAntes) fotosAntesBufs.push({ name: fn, buf });
-                  else         fotosFinalBufs.push({ name: fn, buf });
-                }
+                if (esAntes) fotosAntesBufs.push({ name: fn, buf });
+                else         fotosFinalBufs.push({ name: fn, buf });
               }
+              console.log('[cert] ZIP', zipFile.name, '->', allFiles.filter(esImagen).length, 'imgs (', esAntes ? 'ANTES' : 'FINAL', ')');
             } finally {
               try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
             }
           } catch (eZip) {
-            console.warn('[albaran] Error extrayendo ZIP', zipFile.name, eZip.message);
+            console.warn('[cert] Error extrayendo ZIP', zipFile.name, ':', eZip.message);
           }
         }
+        console.log('[cert] Fotos antes:', fotosAntesBufs.length, '| Fotos final:', fotosFinalBufs.length, '| Albarán OK:', !!albaranBuf);
 
-        console.log('[albaran] Fotos antes:', fotosAntesBufs.length, '| Fotos final:', fotosFinalBufs.length, '| Albarán disponible:', !!albaranBuf);
-
-        // Generar PDF de certificación incluyendo albarán recién generado + fotos
-        const fechaHora = timestamp || new Date().toLocaleString('es-ES');
+        // ── 4. Generar PDF de certificación ──────────────────────────────────────
+        const fechaHora  = timestamp || new Date().toLocaleString('es-ES');
         const pdfCertBuf = await generarCertificacion({
-          pedido:         pedidoStr,
-          datosExcel:     datosExcel || {},
-          fechaHora,
-          operario:       req.user.name,
-          fotosAntesBufs,
-          fotosFinalBufs,
-          albaranBuf      // el albarán que acabamos de generar
+          pedido: pedidoStr, datosExcel: datosExcel || {},
+          fechaHora, operario: req.user.name,
+          fotosAntesBufs, fotosFinalBufs, albaranBuf
         });
 
-        // Subir la certificación
-        await ensureDir(client, dirCert);
-        const tsCert  = tsNombre(req.user.id || '');
+        // ── 5. Subir la certificación ─────────────────────────────────────────────
+        await clientCert.cd(BASE_PATH);
+        await ensureDir(clientCert, dirCert);
+        const tsCert   = tsNombre(req.user.id || '');
         const certName = `${pedidoStr}_${tsCert}_Certificacion_Final_Trabajo.pdf`;
-        await client.uploadFrom(Readable.from(pdfCertBuf), path.posix.join(dirCert, certName));
+        await clientCert.uploadFrom(Readable.from(pdfCertBuf), path.posix.join(dirCert, certName));
+        console.log('[cert] Certificación subida:', certName);
 
-        // Eliminar de "Fotografias Pte Certificacion" todos los archivos de este pedido (fotos + albarán)
-        const listPteFinal = await ftpListSafe(client, dirPteCert);
-        const todosZipsPedido = listPteFinal.filter(f =>
-          f.type !== 2 &&
-          /\.zip$/i.test(f.name) &&
-          (f.name.startsWith(pedidoStr + '_') || f.name.startsWith(pedidoStr + ' '))
-        );
-        for (const zipFile of todosZipsPedido) {
-          try {
-            await client.remove(path.posix.join(dirPteCert, zipFile.name));
-            console.log('[albaran] Eliminado de Fotografias Pte Certificacion:', zipFile.name);
-          } catch (eDel) {
-            console.warn('[albaran] No se pudo eliminar', zipFile.name, eDel.message);
+        // ── 6. Eliminar todos los ZIPs del pedido de Fotografias Pte Certificacion ─
+        try {
+          await clientCert.cd(dirPteCert);
+          const listFinal = await clientCert.list();
+          const aEliminar = listFinal.filter(f =>
+            f.type !== 2 &&
+            /\.zip$/i.test(f.name) &&
+            (f.name.startsWith(pedidoStr + '_') || f.name.startsWith(pedidoStr + ' '))
+          );
+          for (const zipFile of aEliminar) {
+            try {
+              await clientCert.remove(path.posix.join(dirPteCert, zipFile.name));
+              console.log('[cert] Eliminado:', zipFile.name);
+            } catch (eDel) {
+              console.warn('[cert] No se pudo eliminar', zipFile.name, ':', eDel.message);
+            }
           }
+        } catch (eClean) {
+          console.warn('[cert] Error en limpieza de ZIPs:', eClean.message);
         }
 
         return res.json({
-          success: true,
-          fileName: pdfName,
-          ruta: `${tDir}/${pdfName}`,
+          success: true, fileName: pdfName, ruta: `${tDir}/${pdfName}`,
           certificacion: { fileName: certName, ruta: `${dirCert}/${certName}` }
         });
       } catch (eCert) {
-        // Si falla la certificación, el albarán ya está subido, devolvemos éxito con advertencia
-        console.error('[albaran] Error generando certificación automática:', eCert.message);
+        console.error('[cert] Error generando certificación automática:', eCert.message);
         return res.json({
-          success: true,
-          fileName: pdfName,
-          ruta: `${tDir}/${pdfName}`,
+          success: true, fileName: pdfName, ruta: `${tDir}/${pdfName}`,
           certificacionError: 'Albarán subido correctamente, pero falló la generación automática de la certificación: ' + eCert.message
         });
+      } finally {
+        clientCert.close();
       }
     }
 
