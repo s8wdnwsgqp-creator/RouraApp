@@ -166,6 +166,8 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:1
 .btn-success:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(14,165,105,.35);color:#fff}
 .btn-danger{background:var(--red-dim);color:var(--red);border-color:rgba(229,62,62,.25)}
 .btn-danger:hover{background:rgba(229,62,62,.15);border-color:var(--red)}
+.btn-warning{background:rgba(245,158,11,.15);color:#d97706;border-color:rgba(245,158,11,.3);font-weight:600}
+.btn-warning:hover{background:rgba(245,158,11,.25);border-color:#d97706}
 .btn-gold{background:linear-gradient(135deg,var(--gold),#d97706);color:#fff;border-color:var(--gold);box-shadow:0 2px 8px rgba(245,158,11,.25)}
 .btn-gold:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(245,158,11,.35);color:#fff}
 .btn-lg{padding:13px 28px;font-size:14px;border-radius:var(--radius)}
@@ -425,7 +427,7 @@ tr:hover .dld-btn{opacity:1}
 
 <!-- CARGAR -->
 <div id="screenCargar" class="screen">
-  <div class="sub-bar"><button class="back-btn" onclick="nav('home')">← Inicio</button><span class="breadcrumb">Inicio › <span>Cargar Ficheros</span></span></div>
+  <div class="sub-bar"><button class="back-btn" onclick="nav('home')">← Inicio</button><span class="breadcrumb">Inicio › <span>Documentar Trabajos</span></span></div>
   <div class="cards-page">
     <div class="cards-heading"><h2>Tipo de Trabajo</h2><p>Selecciona la categoría de documentación</p></div>
     <div class="cards-grid">
@@ -550,7 +552,9 @@ tr:hover .dld-btn{opacity:1}
     <div style="display:flex;flex-direction:column;gap:10px;margin-top:4px">
       <button class="btn btn-success btn-full btn-lg" id="btnInstSubir" onclick="instSubirLote()" disabled>⬆ Subir este lote al servidor</button>
       <button class="btn btn-full" id="btnInstOtro" onclick="instOtroLote()" style="display:none">＋ Cargar otro lote</button>
-      <button class="btn btn-primary btn-full btn-lg" id="btnInstFinalizar" onclick="instFinalizar()" style="display:none">✓ Declarar Finalizada y Firmar Albarán</button>
+      <button class="btn btn-warning btn-full btn-lg" id="btnInstNoMasFotos" onclick="instNoMasFotos()" style="display:none">✓ No hay más fotos que cargar</button>
+      <button class="btn btn-primary btn-full btn-lg" id="btnInstFinalizar" onclick="instFinalizar()" style="display:none">✓ Instalación Finalizada. Rellenar Albarán Final Trabajos</button>
+      <button class="btn btn-full btn-lg" id="btnInstNoFinalizada" onclick="instNoFinalizada()" style="display:none;background:var(--danger);color:#000;font-weight:600">⚠ Instalación NO Finalizada. Solo subir fotografías</button>
     </div>
   </div>
 </div>
@@ -997,6 +1001,61 @@ tr:hover .dld-btn{opacity:1}
         <div class="card-desc">Cumplimentar informe de inspección de seguridad</div>
         <div class="card-arrow">→</div>
       </div>
+      <div class="card c-green" onclick="startFlujo('inspeccionSeguridad')">
+        <div class="card-ico">📸</div>
+        <div class="card-name">Fotografías Inspección de Seguridad</div>
+        <div class="card-desc">Cargar fotografías de la inspección de seguridad al servidor FTP</div>
+        <div class="card-arrow">→</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- FOTOGRAFIAS INSPECCION SEGURIDAD -->
+<div id="screenFotosInspSeguridad" class="screen">
+  <div class="sub-bar">
+    <button class="back-btn" onclick="nav('informeVisitas')">← Atrás</button>
+    <span class="breadcrumb">Inicio › Informe Visitas › <span>Fotografías Inspección de Seguridad</span></span>
+  </div>
+  <div class="page-wrap">
+    <div class="sec-row">
+      <div>
+        <div class="sec-title" id="inspSegTitle">Fotografías Inspección de Seguridad</div>
+        <div class="sec-sub" id="inspSegSub"></div>
+      </div>
+      <div class="counter" id="inspSegCounter">0 / 20</div>
+    </div>
+    <label class="cam-btn">📷 Abrir Cámara del Dispositivo
+      <input type="file" accept="image/*" capture="environment" multiple id="inputCamaraInspSeg" style="display:none"/>
+    </label>
+    <div class="upload-zone" id="uploadZoneInspSeg">
+      <input type="file" id="inputGaleriaInspSeg" multiple accept="image/*"/>
+      <div class="upload-zone-ico">📁</div>
+      <div class="upload-zone-title">Arrastra fotografías aquí o pulsa para seleccionar</div>
+      <div class="upload-zone-sub">Máximo 20 fotografías por lote</div>
+    </div>
+    <div id="fileListInspSegWrap" style="display:none">
+      <div class="sec-row" style="margin-bottom:8px">
+        <div class="sec-title">Archivos seleccionados</div>
+        <button class="btn" onclick="clearInspSegFiles()" style="font-size:11px;padding:5px 10px">✕ Limpiar</button>
+      </div>
+      <div class="file-list" id="fileListInspSegEl"></div>
+    </div>
+    <div class="prog-wrap" id="inspSegProgWrap" style="display:none">
+      <div class="prog-labels"><span id="inspSegProgTxt">Subiendo...</span><span id="inspSegProgPct">0%</span></div>
+      <div class="prog-bg"><div class="prog-fill" id="inspSegProgBar"></div></div>
+    </div>
+    <div id="inspSegStatus"></div>
+    <div id="inspSegLotesWrap" style="display:none">
+      <div class="lote-panel">
+        <div class="lote-panel-header">Lotes subidos correctamente</div>
+        <div id="inspSegLotesList"></div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-top:4px">
+      <button class="btn btn-success btn-full btn-lg" id="btnInspSegSubir" onclick="inspSegSubirLote()" disabled>⬆ Subir este lote al servidor</button>
+      <button class="btn btn-full" id="btnInspSegOtro" onclick="inspSegOtroLote()" style="display:none">＋ Cargar otro lote</button>
+      <button class="btn btn-primary btn-full btn-lg" id="btnInspSegFinalizar" onclick="nav('home')" style="display:none">✓ Finalizar y volver al inicio</button>
     </div>
   </div>
 </div>
@@ -1091,15 +1150,15 @@ function showApp(){
   if(isAdmin){
     // Admin ve todo
     addCard('c-blue',   '🗂️', 'Explorador FTP',      'Navega y descarga archivos del servidor',                     ()=>nav('explorer'));
-    addCard('c-green',  '📤', 'Cargar Ficheros',      'Sube documentos y fotos de trabajos',                         ()=>nav('cargar'));
+    addCard('c-green',  '📤', 'Documentar Trabajos',      'Sube documentos y fotos de trabajos',                         ()=>nav('cargar'));
     addCard('c-purple', '🔍', 'CFO',                  'Visita CFO — Registro de incidencias y apertura de objeciones',()=>startFlujo('cfo'));
     addCard('c-orange', '📋', 'Informe Visitas',       'Visitas de Liderazgo e Inspecciones de Seguridad',            ()=>nav('informeVisitas'));
     addCard('c-blue',   '🗺️', 'Mapa en Tiempo Real',  'Ubicación de usuarios conectados',                            ()=>nav('mapa'));
     addCard('c-gold',   '👥', 'Gestión de Usuarios',  'Crear y eliminar usuarios del sistema',                       ()=>nav('usuarios'));
     addCard('c-orange', '🚛', 'Expediciones',          'Registrar y fotografiar expediciones de pedidos',             ()=>startFlujo('expediciones'));
   } else {
-    // Usuario estándar: solo Cargar Ficheros, CFO, Mapa y Expediciones
-    addCard('c-green',  '📤', 'Cargar Ficheros',      'Sube documentos y fotos de trabajos',                         ()=>nav('cargar'));
+    // Usuario estándar: solo Documentar Trabajos, CFO, Mapa y Expediciones
+    addCard('c-green',  '📤', 'Documentar Trabajos',      'Sube documentos y fotos de trabajos',                         ()=>nav('cargar'));
     addCard('c-purple', '🔍', 'CFO',                  'Visita CFO — Registro de incidencias y apertura de objeciones',()=>startFlujo('cfo'));
     addCard('c-orange', '📋', 'Informe Visitas',       'Visitas de Liderazgo e Inspecciones de Seguridad',            ()=>nav('informeVisitas'));
     addCard('c-blue',   '🗺️', 'Mapa en Tiempo Real',  'Ubicación de usuarios conectados',                            ()=>nav('mapa'));
@@ -1152,7 +1211,7 @@ function initGeo(){
 // ── NAV ──────────────────────────────────────────────────────
 function nav(s,p){
   document.querySelectorAll('.screen').forEach(el=>el.classList.remove('active'));
-  const map={home:'screenHome',explorer:'screenExplorer',cargar:'screenCargar',pedido:'screenPedido',confirmPedido:'screenConfirmPedido',medicion:'screenMedicion',instalacion:'screenInstalacion',fotos:'screenFotos',fotosInst:'screenFotosInst',albaran:'screenAlbaran',usuarios:'screenUsuarios',mapa:'screenMapa',cfo:'screenCFO',cfoInc:'screenCFOInc',cierreCFO:'screenCierreCFO',informeVisitas:'screenInformeVisitas',expediciones:'screenExpediciones',expedFotos:'screenExpedFotos'};
+  const map={home:'screenHome',explorer:'screenExplorer',cargar:'screenCargar',pedido:'screenPedido',confirmPedido:'screenConfirmPedido',medicion:'screenMedicion',instalacion:'screenInstalacion',fotos:'screenFotos',fotosInst:'screenFotosInst',albaran:'screenAlbaran',usuarios:'screenUsuarios',mapa:'screenMapa',cfo:'screenCFO',cfoInc:'screenCFOInc',cierreCFO:'screenCierreCFO',informeVisitas:'screenInformeVisitas',expediciones:'screenExpediciones',expedFotos:'screenExpedFotos',fotosInspSeguridad:'screenFotosInspSeguridad'};
   const el=document.getElementById(map[s]);if(el)el.classList.add('active');
   if(s==='explorer'&&expItems.length===0)expLoad('/');
   if(s==='fotos')setupFotosScreen(p);
@@ -1164,6 +1223,7 @@ function nav(s,p){
   if(s==='cfo'){document.getElementById('lbCFOPed').textContent=currentPedido;document.getElementById('subCFO').textContent='Pedido nº '+currentPedido;}
   if(s==='expediciones')setupExpedicionesScreen();
   if(s==='expedFotos')setupExpedFotosScreen();
+  if(s==='fotosInspSeguridad')setupFotosInspSeguridadScreen();
   if(s==='usuarios')loadUsers();
   if(s==='mapa'){initMap();startMapRefresh();}
   if(s!=='mapa')stopMapRefresh();
@@ -1171,7 +1231,8 @@ function nav(s,p){
 function startFlujo(t){
   currentFlujo=t;medFiles=[];medLotes=[];instFiles=[];instAntesLotes=[];instFinLotes=[];
   expedFiles=[];expedLotes=[];
-  if(t==='expediciones') nav('pedido');
+  if(t==='inspeccionSeguridad') nav('pedido');
+  else if(t==='expediciones') nav('pedido');
   else nav('pedido');
 }
 
@@ -1180,10 +1241,11 @@ function setupPedidoScreen(){
   const isIns=currentFlujo==='instalacion';
   const isCFO=currentFlujo==='cfo';
   const isExp=currentFlujo==='expediciones';
-  document.getElementById('pedidoIcon').textContent=isCFO?'🔍':isIns?'🔧':isExp?'🚛':'📐';
-  document.getElementById('pedidoTitle').textContent=isCFO?'Visita CFO':isIns?'Documentar Trabajo de Instalación':isExp?'Expedición — Número de Pedido':'Toma de Datos / Medición';
-  document.getElementById('pedidoBc').innerHTML=isCFO?`Inicio › CFO › <span>Número de Pedido</span>`:isExp?`Inicio › Expediciones › <span>Número de Pedido</span>`:`Inicio › Cargar Ficheros › <span>${isIns?'Instalación':'Medición'}</span>`;
-  document.getElementById('pedidoBack').onclick=()=>nav(isCFO?'home':isExp?'home':'cargar');
+  const isInspSeg=currentFlujo==='inspeccionSeguridad';
+  document.getElementById('pedidoIcon').textContent=isCFO?'🔍':isIns?'🔧':isExp?'🚛':isInspSeg?'📸':'📐';
+  document.getElementById('pedidoTitle').textContent=isCFO?'Visita CFO':isIns?'Documentar Trabajo de Instalación':isExp?'Expedición — Número de Pedido':isInspSeg?'Fotografías Inspección de Seguridad':'Toma de Datos / Medición';
+  document.getElementById('pedidoBc').innerHTML=isCFO?`Inicio › CFO › <span>Número de Pedido</span>`:isExp?`Inicio › Expediciones › <span>Número de Pedido</span>`:isInspSeg?`Inicio › Informe Visitas › <span>Número de Pedido</span>`:`Inicio › Documentar Trabajos › <span>${isIns?'Instalación':'Medición'}</span>`;
+  document.getElementById('pedidoBack').onclick=()=>nav(isCFO?'home':isExp?'home':isInspSeg?'informeVisitas':'cargar');
   document.getElementById('inputPedido').value=currentPedido||'';
   setTimeout(()=>document.getElementById('inputPedido').focus(),200);
 }
@@ -1228,6 +1290,7 @@ function confirmPedidoAceptar(){
   if(currentFlujo==='cfo') nav('cfo');
   else if(currentFlujo==='medicion') nav('medicion');
   else if(currentFlujo==='expediciones') nav('expediciones');
+  else if(currentFlujo==='inspeccionSeguridad') nav('fotosInspSeguridad');
   else nav('instalacion');
 }
 function confirmPedidoCancelar(){currentPedido='';nav('home');}
@@ -1369,6 +1432,8 @@ function setupFotosInstScreen(fase){
   document.getElementById('fotosInstBc').innerHTML=`Instalación › ${currentPedido} › <span>${esAntes?'Fotos Antes':'Fotos Final'}</span>`;
   document.getElementById('fotosInstBack').onclick=()=>nav('instalacion');
   document.getElementById('btnInstFinalizar').style.display='none';
+  document.getElementById('btnInstNoMasFotos').style.display='none';
+  document.getElementById('btnInstNoFinalizada').style.display='none';
   document.getElementById('btnInstOtro').style.display='none';
   document.getElementById('instLotesWrap').style.display='none';
   document.getElementById('instUploadStatus').innerHTML='';
@@ -1423,7 +1488,12 @@ async function instSubirLote(){
     document.getElementById('instUploadStatus').innerHTML=`<div class="sbox ok">✓ Lote de ${lote.n} archivo(s) subido correctamente</div>`;
     instFiles=[];updateInstUI();clearInstFiles();
     document.getElementById('btnInstOtro').style.display='flex';
-    if(instFase==='fin')document.getElementById('btnInstFinalizar').style.display='flex';
+    if(instFase==='antes'){
+      document.getElementById('btnInstNoMasFotos').style.display='flex';
+    } else {
+      document.getElementById('btnInstFinalizar').style.display='flex';
+      document.getElementById('btnInstNoFinalizada').style.display='flex';
+    }
     showToast(`✓ ${lote.n} archivos subidos`,'ok');
   }catch(e){clearInterval(iv);bar.style.width='0%';document.getElementById('instUploadStatus').innerHTML=`<div class="sbox err">⚠ Error: ${e.message}</div>`;}
   finally{btn.disabled=false;setTimeout(()=>pw.style.display='none',1500);}
@@ -1435,8 +1505,44 @@ function updateInstLotes(){
   wrap.style.display='block';list.innerHTML='';
   lotes.forEach((l,i)=>{const r=document.createElement('div');r.className='lote-row';r.innerHTML=`<span class="lote-label">Lote ${i+1} · ${l.ts}</span><span class="lote-count">${l.n} archivos ✓</span>`;list.appendChild(r);});
 }
-function instOtroLote(){document.getElementById('btnInstOtro').style.display='none';document.getElementById('instUploadStatus').innerHTML='';instFiles=[];updateInstUI();}
+function instOtroLote(){
+  document.getElementById('btnInstOtro').style.display='none';
+  document.getElementById('btnInstNoMasFotos').style.display='none';
+  document.getElementById('btnInstFinalizar').style.display='none';
+  document.getElementById('btnInstNoFinalizada').style.display='none';
+  document.getElementById('instUploadStatus').innerHTML='';
+  instFiles=[];updateInstUI();
+}
 function instFinalizar(){if(!instAntesLotes.length){document.getElementById('modalSinAntes').classList.add('open');return;}irAlAlbaran('instalacion');}
+
+async function instNoMasFotos(){
+  // Si hay archivos sin subir, subirlos primero
+  if(instFiles.length>0){
+    await instSubirLote();
+  }
+  nav('home');
+}
+
+async function instNoFinalizada(){
+  // Si hay archivos sin subir, subirlos
+  if(instFiles.length>0){
+    const btn=document.getElementById('btnInstNoFinalizada');
+    btn.disabled=true; btn.textContent='⏳ Subiendo...';
+    const cat='fotos_final';
+    const fd=new FormData();instFiles.forEach(f=>fd.append('files',f));fd.append('pedido',currentPedido);fd.append('categoria',cat);
+    try{
+      const res=await fetch(`${API}/api/upload-batch`,{method:'POST',headers:{Authorization:'Bearer '+token},body:fd});
+      const data=await res.json();
+      if(!data.success)throw new Error(data.error);
+      showToast('✓ Fotografías subidas correctamente','ok');
+    }catch(e){
+      showToast('⚠ Error subiendo fotos: '+e.message,'err');
+    }finally{
+      btn.disabled=false;
+    }
+  }
+  nav('home');
+}
 
 // ── ALBARAN ───────────────────────────────────────────────────
 function irAlAlbaran(tipo){albaranTipo=tipo;nav('albaran');}
@@ -2374,6 +2480,119 @@ async function expedSubirFotos() {
     statusEl.innerHTML = '<div class="sbox err">⚠ Error: ' + e.message + '</div>';
     btn.disabled = false; btn.textContent = '🚛 Subir Fotografías de Expedición al Servidor';
   }
+}
+
+// ══════════════════════════════════════════════════════════
+// ── FOTOGRAFÍAS INSPECCIÓN DE SEGURIDAD JS ─────────────────
+// ══════════════════════════════════════════════════════════
+let inspSegFiles = [];
+let inspSegLotes = [];
+
+function setupFotosInspSeguridadScreen(){
+  inspSegFiles = [];
+  document.getElementById('inspSegSub').textContent = 'Pedido nº ' + currentPedido;
+  document.getElementById('inspSegLotesWrap').style.display = 'none';
+  document.getElementById('inspSegStatus').innerHTML = '';
+  document.getElementById('inspSegProgWrap').style.display = 'none';
+  document.getElementById('btnInspSegOtro').style.display = 'none';
+  document.getElementById('btnInspSegFinalizar').style.display = 'none';
+  updateInspSegUI();
+  // Bind file inputs
+  const cam = document.getElementById('inputCamaraInspSeg');
+  const gal = document.getElementById('inputGaleriaInspSeg');
+  if(cam) cam.onchange = (e) => onInspSegFilesAdded(e.target.files);
+  if(gal) gal.onchange = (e) => onInspSegFilesAdded(e.target.files);
+  const zone = document.getElementById('uploadZoneInspSeg');
+  if(zone){
+    zone.ondragover = (e) => { e.preventDefault(); zone.classList.add('dragover'); };
+    zone.ondragleave = () => zone.classList.remove('dragover');
+    zone.ondrop = (e) => { e.preventDefault(); zone.classList.remove('dragover'); onInspSegFilesAdded(e.dataTransfer.files); };
+    zone.onclick = () => gal && gal.click();
+  }
+}
+
+async function onInspSegFilesAdded(files){
+  if(!files||files.length===0) return;
+  const arr = Array.from(files);
+  const rem = 20 - inspSegFiles.length;
+  if(rem<=0){ showToast('Ya tienes 20 archivos. Sube este lote primero.','err'); return; }
+  if(arr.length>rem){ showToast('Máximo 20 por lote. Se añaden solo '+rem+'.','err'); arr.splice(rem); }
+  const comprimidos = await comprimirArchivos(arr);
+  comprimidos.forEach(f => inspSegFiles.push(f));
+  updateInspSegUI();
+}
+
+function updateInspSegUI(){
+  const n = inspSegFiles.length;
+  const cb = document.getElementById('inspSegCounter');
+  cb.textContent = `${n} / 20`; cb.className = 'counter' + (n>0?' has':'');
+  const wrap = document.getElementById('fileListInspSegWrap');
+  wrap.style.display = n>0 ? 'block' : 'none';
+  const el = document.getElementById('fileListInspSegEl');
+  el.innerHTML = '';
+  inspSegFiles.forEach((f,i) => {
+    const d = document.createElement('div'); d.className = 'file-item';
+    d.innerHTML = `<span class="fi-icon">${getIcon(f.name)}</span><span class="fi-name">${f.name}</span><span class="fi-size">${fmtSize(f.size)}</span><button class="fi-rm" onclick="removeInspSegFile(${i})">✕</button>`;
+    el.appendChild(d);
+  });
+  document.getElementById('btnInspSegSubir').disabled = n===0;
+}
+
+function removeInspSegFile(i){ inspSegFiles.splice(i,1); updateInspSegUI(); }
+
+function clearInspSegFiles(){
+  inspSegFiles = [];
+  updateInspSegUI();
+  const gal = document.getElementById('inputGaleriaInspSeg');
+  if(gal){ gal.value=''; try{gal.type='text';gal.type='file';}catch(_){} }
+  const cam = document.getElementById('inputCamaraInspSeg');
+  if(cam){ cam.value=''; try{cam.type='text';cam.type='file';}catch(_){} }
+}
+
+async function inspSegSubirLote(){
+  if(!inspSegFiles.length) return;
+  const btn = document.getElementById('btnInspSegSubir'); btn.disabled = true;
+  const pw = document.getElementById('inspSegProgWrap'); pw.style.display = 'flex';
+  const bar = document.getElementById('inspSegProgBar'), pct = document.getElementById('inspSegProgPct'), txt = document.getElementById('inspSegProgTxt');
+  document.getElementById('inspSegStatus').innerHTML = '';
+  const fd = new FormData();
+  inspSegFiles.forEach(f => fd.append('files', f));
+  fd.append('pedido', currentPedido);
+  txt.textContent = `Subiendo ${inspSegFiles.length} archivo(s)...`;
+  let fake = 5;
+  const iv = setInterval(() => { if(fake<85){ fake+=Math.random()*8; bar.style.width=fake+'%'; pct.textContent=Math.round(fake)+'%'; } }, 350);
+  try{
+    const res = await fetch(`${API}/api/inspecciones-seguridad/fotos`, { method:'POST', headers:{Authorization:'Bearer '+token}, body:fd });
+    clearInterval(iv); const data = await res.json(); bar.style.width='100%'; pct.textContent='100%';
+    if(!data.success) throw new Error(data.error);
+    const lote = { n: inspSegFiles.length, ts: new Date().toLocaleTimeString('es-ES') };
+    inspSegLotes.push(lote);
+    updateInspSegLotes();
+    document.getElementById('inspSegStatus').innerHTML = `<div class="sbox ok">✓ Lote de ${lote.n} archivo(s) subido correctamente<br>📦 ${data.zipFile}</div>`;
+    inspSegFiles = []; updateInspSegUI(); clearInspSegFiles();
+    document.getElementById('btnInspSegOtro').style.display = 'flex';
+    document.getElementById('btnInspSegFinalizar').style.display = 'flex';
+    showToast(`✓ ${lote.n} fotos de inspección subidas`,'ok');
+  }catch(e){
+    clearInterval(iv); bar.style.width='0%';
+    document.getElementById('inspSegStatus').innerHTML = `<div class="sbox err">⚠ Error: ${e.message}</div>`;
+  }finally{
+    btn.disabled=false; setTimeout(()=>pw.style.display='none',1500);
+  }
+}
+
+function updateInspSegLotes(){
+  const wrap = document.getElementById('inspSegLotesWrap'), list = document.getElementById('inspSegLotesList');
+  if(!inspSegLotes.length){ wrap.style.display='none'; return; }
+  wrap.style.display='block'; list.innerHTML='';
+  inspSegLotes.forEach((l,i)=>{ const r=document.createElement('div'); r.className='lote-row'; r.innerHTML=`<span class="lote-label">Lote ${i+1} · ${l.ts}</span><span class="lote-count">${l.n} archivos ✓</span>`; list.appendChild(r); });
+}
+
+function inspSegOtroLote(){
+  document.getElementById('btnInspSegOtro').style.display='none';
+  document.getElementById('btnInspSegFinalizar').style.display='none';
+  document.getElementById('inspSegStatus').innerHTML='';
+  inspSegFiles=[]; updateInspSegUI();
 }
 
 // ══════════════════════════════════════════════════════════
