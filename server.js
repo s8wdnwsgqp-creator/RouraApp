@@ -456,6 +456,18 @@ app.post('/api/upload-batch', requireAuth, upload.array('files', 20), async (req
     }
     if (!uploadedOk) { console.error('[upload-batch] Todos los dirs fallaron:', catInfo.dirs, lastErr?.message); throw lastErr || new Error('No se pudo subir a ningún directorio'); }
 
+    // ── Si son fotos antes/final, copiar también a "Fotografias Pte Certificacion" ──
+    if (cat === 'fotos_antes' || cat === 'fotos_final') {
+      try {
+        const dirPteCert = path.posix.join(BASE_PATH, 'Fotografias Pte Certificacion');
+        await ensureDir(client, dirPteCert);
+        await client.uploadFrom(Readable.from(zipBuffer), path.posix.join(dirPteCert, zipName));
+        console.log('[upload-batch] Copia en Fotografias Pte Certificacion:', zipName);
+      } catch (eCert) {
+        console.warn('[upload-batch] No se pudo copiar a Fotografias Pte Certificacion:', eCert.message);
+      }
+    }
+
     res.json({
       success: true,
       count:   entries.length,
