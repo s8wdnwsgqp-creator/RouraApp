@@ -18,11 +18,14 @@ const JWT_SECRET = process.env.JWT_SECRET || 'roura-cevasa-secret-2025';
 const USERS_FILE = path.join(__dirname, 'data', 'users.json');
 const BASE_PATH  = '/www';
 
-// ── Timestamp legible para nombres de archivo ──────────────
-function tsNombre() {
+// ── Timestamp en formato yyyymmdd_hhmmss para nombres de archivo ──────────
+function tsNombre(instaladorId) {
   const n = new Date();
   const p = v => String(v).padStart(2,'0');
-  return `${p(n.getDate())}-${p(n.getMonth()+1)}-${n.getFullYear()} ${p(n.getHours())}:${p(n.getMinutes())}:${p(n.getSeconds())}`;
+  const fecha = `${n.getFullYear()}${p(n.getMonth()+1)}${p(n.getDate())}`;
+  const hora  = `${p(n.getHours())}${p(n.getMinutes())}${p(n.getSeconds())}`;
+  const base  = `${fecha}_${hora}`;
+  return instaladorId ? `${base}_${instaladorId}` : base;
 }
 
 const LOGO_PATH  = path.join(__dirname, 'public', 'logo.png');
@@ -83,6 +86,16 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '150mb' }));
 app.use(express.urlencoded({ extended: true, limit: '150mb' }));
+// Capturar errores de parse JSON y devolver JSON en lugar de HTML
+app.use((err, req, res, next) => {
+  if (err.type === 'entity.parse.failed' || err.status === 400) {
+    return res.status(400).json({ success: false, error: 'Error al parsear el cuerpo de la petición: ' + err.message });
+  }
+  if (err.status === 413) {
+    return res.status(413).json({ success: false, error: 'Archivo demasiado grande. Límite: 150MB.' });
+  }
+  next(err);
+});
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
@@ -114,7 +127,7 @@ app.post('/api/auth/login', (req, res) => {
   const users = getUsers();
   const user = users.find(u => u.username === username.trim().toLowerCase());
   if (!user || !bcrypt.compareSync(password, user.password)) return res.status(401).json({ success: false, error: 'Usuario o contraseña incorrectos' });
-  const token = jwt.sign({ id: user.id, username: user.username, name: user.name, role: user.role }, JWT_SECRET, { expiresIn: '12h' });
+  const token = jwt.sign({ id: user.id, username: user.username, name: user.name, role: user.role, id_instalador: user.id_instalador || '' }, JWT_SECRET, { expiresIn: '12h' });
   activeSessions[token] = { username: user.username, name: user.name, role: user.role, lat: null, lng: null, accuracy: null, lastSeen: Date.now(), loginAt: Date.now() };
   res.json({ success: true, token, user: { username: user.username, name: user.name, role: user.role } });
 });
@@ -129,16 +142,49 @@ app.post('/api/auth/ping', requireAuth, (req, res) => {
 // ── ADMIN USERS ─────────────────────────────────────────────
 app.get('/api/admin/users', requireAdmin, (req, res) => {
   const users = getUsers();
-  res.json({ success: true, users: users.map(u => ({ id: u.id, username: u.username, name: u.name, role: u.role, createdAt: u.createdAt })) });
+  res.json({ success: true, users: users.map(u => ({
+    id: u.id, username: u.username, name: u.name, role: u.role, createdAt: u.createdAt,
+    email: u.email || '', apellidos: u.apellidos || '',
+    id_delegacion: u.id_delegacion || '', id_instalador: u.id_instalador || '',
+    nivel_acceso: u.nivel_acceso || ''
+  })) });
 });
 app.post('/api/admin/users', requireAdmin, (req, res) => {
-  const { username, password, name, role } = req.body;
+  const { username, password, name, role, email, apellidos, id_delegacion, id_instalador, nivel_acceso } = req.body;
   if (!username || !password || !name) return res.status(400).json({ success: false, error: 'Faltan campos obligatorios' });
   const users = getUsers();
   if (users.find(u => u.username === username.trim().toLowerCase())) return res.status(409).json({ success: false, error: 'El usuario ya existe' });
-  const newUser = { id: Date.now().toString(), username: username.trim().toLowerCase(), password: bcrypt.hashSync(password, 10), name: name.trim(), role: role === 'admin' ? 'admin' : 'user', createdAt: new Date().toISOString() };
+  const newUser = {
+    id: Date.now().toString(),
+    username: username.trim().toLowerCase(),
+    password: bcrypt.hashSync(password, 10),
+    name: name.trim(),
+    role: role === 'admin' ? 'admin' : 'user',
+    email: (email || '').trim(),
+    apellidos: (apellidos || '').trim(),
+    id_delegacion: (id_delegacion || '').trim(),
+    id_instalador: (id_instalador || '').trim(),
+    nivel_acceso: (nivel_acceso || '').trim(),
+    createdAt: new Date().toISOString()
+  };
   users.push(newUser); saveUsers(users);
   res.json({ success: true, user: { id: newUser.id, username: newUser.username, name: newUser.name, role: newUser.role } });
+});
+app.put('/api/admin/users/:id', requireAdmin, (req, res) => {
+  const users = getUsers();
+  const idx = users.findIndex(u => u.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ success: false, error: 'Usuario no encontrado' });
+  const { name, email, apellidos, id_delegacion, id_instalador, nivel_acceso, role, password } = req.body;
+  if (name) users[idx].name = name.trim();
+  if (email !== undefined) users[idx].email = email.trim();
+  if (apellidos !== undefined) users[idx].apellidos = apellidos.trim();
+  if (id_delegacion !== undefined) users[idx].id_delegacion = id_delegacion.trim();
+  if (id_instalador !== undefined) users[idx].id_instalador = id_instalador.trim();
+  if (nivel_acceso !== undefined) users[idx].nivel_acceso = nivel_acceso.trim();
+  if (role) users[idx].role = role === 'admin' ? 'admin' : 'user';
+  if (password && password.length >= 4) users[idx].password = bcrypt.hashSync(password, 10);
+  saveUsers(users);
+  res.json({ success: true });
 });
 app.delete('/api/admin/users/:id', requireAdmin, (req, res) => {
   const users = getUsers();
@@ -151,7 +197,78 @@ app.delete('/api/admin/users/:id', requireAdmin, (req, res) => {
   res.json({ success: true });
 });
 
-// ── EXPORT / IMPORT USERS ────────────────────────────────────
+// ── EXPORT / IMPORT USERS (Excel) ───────────────────────────
+app.get('/api/admin/users/export-excel', requireAdmin, (req, res) => {
+  try {
+    const users = getUsers();
+    const rows = users.map(u => ({
+      'Id_Usuario':        u.id || '',
+      'Email':             u.email || '',
+      'Nombre':            u.name || '',
+      'Apellidos':         u.apellidos || '',
+      'Id_Delegacion':     u.id_delegacion || '',
+      'Id_Instalador':     u.id_instalador || '',
+      'Usuario_Password':  u.username || '',
+      'Nivel_Acceso':      u.nivel_acceso || '',
+      'Rol_Sistema':       u.role || 'user',
+      'Fecha_Creacion':    u.createdAt || ''
+    }));
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(rows);
+    // Column widths
+    ws['!cols'] = [20,30,20,20,18,18,20,18,14,22].map(w=>({wch:w}));
+    XLSX.utils.book_append_sheet(wb, ws, 'Usuarios');
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="usuarios_export.xlsx"');
+    res.send(buf);
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.post('/api/admin/users/import-excel', requireAdmin, upload.single('file'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, error: 'Sin archivo' });
+    const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+    const users = getUsers();
+    let created = 0, updated = 0;
+    for (const r of rows) {
+      const username = String(r['Usuario_Password'] || '').trim().toLowerCase();
+      if (!username) continue;
+      const existing = users.find(u => u.username === username);
+      if (existing) {
+        if (r['Nombre'])       existing.name          = String(r['Nombre']).trim();
+        if (r['Apellidos'])    existing.apellidos     = String(r['Apellidos']).trim();
+        if (r['Email'])        existing.email         = String(r['Email']).trim();
+        if (r['Id_Delegacion'])existing.id_delegacion = String(r['Id_Delegacion']).trim();
+        if (r['Id_Instalador'])existing.id_instalador = String(r['Id_Instalador']).trim();
+        if (r['Nivel_Acceso']) existing.nivel_acceso  = String(r['Nivel_Acceso']).trim();
+        if (r['Rol_Sistema'])  existing.role          = r['Rol_Sistema']==='admin'?'admin':'user';
+        updated++;
+      } else {
+        const pwd = String(r['Contrasena'] || r['Contraseña'] || '').trim() || username;
+        users.push({
+          id: String(r['Id_Usuario'] || Date.now()).trim() || Date.now().toString(),
+          username,
+          password: bcrypt.hashSync(pwd, 10),
+          name: String(r['Nombre'] || username).trim(),
+          apellidos: String(r['Apellidos'] || '').trim(),
+          email: String(r['Email'] || '').trim(),
+          id_delegacion: String(r['Id_Delegacion'] || '').trim(),
+          id_instalador: String(r['Id_Instalador'] || '').trim(),
+          nivel_acceso: String(r['Nivel_Acceso'] || '').trim(),
+          role: r['Rol_Sistema'] === 'admin' ? 'admin' : 'user',
+          createdAt: new Date().toISOString()
+        });
+        created++;
+      }
+    }
+    saveUsers(users);
+    res.json({ success: true, created, updated });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
 app.get('/api/admin/users/export', requireAdmin, (req, res) => {
   try {
     const raw = fs.existsSync(USERS_FILE) ? fs.readFileSync(USERS_FILE, 'utf8') : '[]';
@@ -165,7 +282,6 @@ app.post('/api/admin/users/import', requireAdmin, (req, res) => {
   try {
     const imported = req.body.users;
     if (!Array.isArray(imported)) return res.status(400).json({ success: false, error: 'Formato inválido' });
-    // Validate each entry has minimum fields
     for (const u of imported) {
       if (!u.id || !u.username || !u.password || !u.name) return res.status(400).json({ success: false, error: 'Registros incompletos en el fichero' });
     }
@@ -290,11 +406,13 @@ app.post('/api/upload-batch', requireAuth, upload.array('files', 20), async (req
 
   // Carpeta de destino según categoría — se intentan múltiples variantes de nombre
   const categoriaMap = {
-    'fotos_medicion':   { dirs: ['TD'],                                                               label: 'Fotografias_Medicion' },
-    'fotos_antes':      { dirs: ['Fotos Inicio','Fotos inicio','fotos inicio','FOTOS INICIO'],     label: 'Fotografias_Antes' },
-    'fotos_final':      { dirs: ['Fotos Fin','Fotos fin','fotos fin','FOTOS FIN'],                 label: 'Fotografias_Final' },
-    'fotos_cfo':        { dirs: ['Fotos Fin','Fotos fin','fotos fin','FOTOS FIN'],                 label: 'Fotografias Visita CFO' },
-    'fotos_cierre_cfo': { dirs: ['Fotos Fin','Fotos fin','fotos fin','FOTOS FIN'],                 label: 'Fotografias Cierre Objeciones CFO' },
+    'fotos_medicion':    { dirs: ['TD'],                                                              label: 'Fotografias_Medicion' },
+    'fotos_antes':       { dirs: ['Fotos Inicio','Fotos inicio','fotos inicio','FOTOS INICIO'],    label: 'Fotografias_Antes' },
+    'fotos_final':       { dirs: ['Fotos Fin','Fotos fin','fotos fin','FOTOS FIN'],                label: 'Fotografias_Final' },
+    'fotos_cfo':         { dirs: ['Fotos Fin','Fotos fin','fotos fin','FOTOS FIN'],                label: 'Fotografias Visita CFO' },
+    'fotos_cierre_cfo':  { dirs: ['Fotos Fin','Fotos fin','fotos fin','FOTOS FIN'],                label: 'Fotografias Cierre Objeciones CFO' },
+    'fotos_expediciones':{ dirs: ['Expediciones'],                                                  label: 'Fotografias Expediciones' },
+    'fotos_inspecciones':{ dirs: ['Inspecciones Seguridad'],                                        label: 'Fotografias Inspeccion Seguridad' },
   };
   const cat     = String(categoria || 'otros').trim();
   const catInfo = categoriaMap[cat] || { dirs: [cat], label: cat };
@@ -314,7 +432,7 @@ app.post('/api/upload-batch', requireAuth, upload.array('files', 20), async (req
 
     // ── Comprimir en un único ZIP en memoria ──────────────
     const zipBuffer  = await crearZipBuffer(entries.map(e => ({ name: e.name, buffer: e.buffer })));
-    const ts         = tsNombre();
+    const ts         = tsNombre(req.user.id_instalador || '');
     const zipName    = `${String(pedido).trim()} ${catInfo.label}_${ts}.zip`;
 
     // ── Subir el ZIP al FTP probando variantes de directorio ─
@@ -370,7 +488,7 @@ app.post('/api/albaran', requireAuth, async (req, res) => {
     const albInfo = albDirMap[tipo] || { dir: 'Albaranes TD', label: 'Albaran' };
     const tDir    = path.posix.join(BASE_PATH, albInfo.dir);
     await ensureDir(client, tDir);
-    const tsAlb   = tsNombre();
+    const tsAlb   = tsNombre(req.user.id_instalador || '');
     const pdfName = `${String(pedido).trim()} ${albInfo.label}_${tsAlb}.pdf`;
     await client.uploadFrom(Readable.from(pdfBuffer), path.posix.join(tDir, pdfName));
 
@@ -707,7 +825,7 @@ app.post('/api/certificacion', requireAuth, async (req, res) => {
 
     // ── Subir al FTP en carpeta Estándar como ZIP ─────────
     await ensureDir(client, dirCert);
-    const tsCert  = tsNombre();
+    const tsCert  = tsNombre(req.user.id_instalador || '');
     const pdfName = `${String(pedido).trim()} Certificacion Final Trabajo_${tsCert}.pdf`;
     await client.uploadFrom(Readable.from(pdfBuf), path.posix.join(dirCert, pdfName));
 
@@ -1208,7 +1326,7 @@ app.post('/api/cierre-cfo', requireAuth, async (req, res) => {
     // PDF → /www/DMA/Cierre Objeciones
     const dirCierre  = path.posix.join(BASE_PATH, 'Cierre Objeciones');
     await ensureDir(client, dirCierre);
-    const tsCierre   = tsNombre();
+    const tsCierre   = tsNombre(req.user.id_instalador || '');
     const pdfName    = `${String(pedido).trim()} Informe Cierre Objeciones CFO_${tsCierre}.pdf`;
     await client.uploadFrom(Readable.from(pdfBuf), path.posix.join(dirCierre, pdfName));
 
@@ -1504,7 +1622,7 @@ app.post('/api/cfo', requireAuth, async (req, res) => {
     // PDF → www/DMA/Apertura Objeciones  (PDF directo)
     const dirPDF  = path.posix.join(BASE_PATH, 'Apertura Objeciones');
     await ensureDir(client, dirPDF);
-    const tsCFO   = tsNombre();
+    const tsCFO   = tsNombre(req.user.id_instalador || '');
     const pdfName = `${String(pedido).trim()} Informe Visita CFO_${tsCFO}.pdf`;
     await client.uploadFrom(Readable.from(pdfBuf), path.posix.join(dirPDF, pdfName));
 
@@ -1807,6 +1925,43 @@ function insertarFotos(doc, fotos, M, startY, CW, W, H, DARK, BLUE, BORDER, WHIT
 
 
 
+// ── EXPEDICIONES ─────────────────────────────────────────────────────────────
+app.post('/api/expediciones/fotos', requireAuth, async (req, res) => {
+  const { pedido, fotos } = req.body;
+  if (!pedido || !Array.isArray(fotos) || fotos.length === 0)
+    return res.status(400).json({ success: false, error: 'Faltan datos (pedido o fotos)' });
+
+  const tDir = path.posix.join(BASE_PATH, 'Expediciones');
+  const entries = [];
+  for (const f of fotos) {
+    try {
+      if (!f.dataUrl || !f.dataUrl.startsWith('data:image')) continue;
+      const b64    = f.dataUrl.replace(/^data:image\/[^;]+;base64,/, '');
+      const buffer = Buffer.from(b64, 'base64');
+      const ext    = (f.type || 'image/jpeg').split('/')[1] || 'jpg';
+      entries.push({ name: f.name || ('foto_' + Date.now() + '.' + ext), buffer });
+    } catch (_) {}
+  }
+  if (entries.length === 0)
+    return res.status(400).json({ success: false, error: 'Sin imágenes válidas' });
+
+  const client = new ftp.Client(180000);
+  client.ftp.verbose = false;
+  try {
+    const zipBuffer = await crearZipBuffer(entries);
+    const ts        = tsNombre(req.user.id_instalador || '');
+    const zipName   = `${String(pedido).trim()} Fotografias Expediciones_${ts}.zip`;
+    await client.access(FTP_CONFIG);
+    await ensureDir(client, tDir);
+    await client.uploadFrom(Readable.from(zipBuffer), path.posix.join(tDir, zipName));
+    res.json({ success: true, zipFile: zipName, count: entries.length });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  } finally {
+    client.close();
+  }
+});
+
 // ── SUBIDA DE FOTOS BASE64 (CFO / Cierre / Mod) ───────────────────────────
 app.post('/api/upload-fotos-b64', requireAuth, async (req, res) => {
   const { pedido, categoria, fotos } = req.body;
@@ -1840,7 +1995,7 @@ app.post('/api/upload-fotos-b64', requireAuth, async (req, res) => {
   client.ftp.verbose = false;
   try {
     const zipBuffer = await crearZipBuffer(entries);
-    const ts        = tsNombre();
+    const ts        = tsNombre(req.user.id_instalador || '');
     const zipName   = `${String(pedido).trim()} ${catInfo.label}_${ts}.zip`;
     await client.access(FTP_CONFIG);
     await ensureDir(client, tDir);
@@ -1851,6 +2006,44 @@ app.post('/api/upload-fotos-b64', requireAuth, async (req, res) => {
   } finally {
     client.close();
   }
+});
+
+// ── INSPECCIONES DE SEGURIDAD — Fotos ────────────────────────────────────────
+app.post('/api/inspecciones-seguridad/fotos', requireAuth, upload.array('files', 20), async (req, res) => {
+  const { pedido } = req.body;
+  if (!pedido) return res.status(400).json({ success: false, error: 'Falta número de pedido' });
+  if (!req.files || req.files.length === 0) return res.status(400).json({ success: false, error: 'No se recibieron archivos' });
+
+  const tDir = path.posix.join(BASE_PATH, 'Inspecciones Seguridad');
+  const entries = req.files.map(file => {
+    const ext  = path.extname(file.originalname) || '';
+    const base = path.basename(file.originalname, ext).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60);
+    const safe = Date.now() + '_' + base + ext;
+    return { name: safe, buffer: file.buffer };
+  });
+
+  const client = new ftp.Client(180000);
+  client.ftp.verbose = false;
+  try {
+    const zipBuffer = await crearZipBuffer(entries);
+    const ts        = tsNombre(req.user.id_instalador || '');
+    const zipName   = `${String(pedido).trim()} Fotografias Inspeccion Seguridad_${ts}.zip`;
+    await client.access(FTP_CONFIG);
+    await ensureDir(client, tDir);
+    await client.uploadFrom(Readable.from(zipBuffer), path.posix.join(tDir, zipName));
+    res.json({ success: true, zipFile: zipName, count: entries.length });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  } finally {
+    client.close();
+  }
+});
+
+// ── GLOBAL ERROR HANDLER (siempre devuelve JSON) ─────────────
+app.use((err, req, res, next) => {
+  console.error('Error no controlado:', err.message);
+  const status = err.status || err.statusCode || 500;
+  res.status(status).json({ success: false, error: err.message || 'Error interno del servidor' });
 });
 
 // ── START ────────────────────────────────────────────────────
