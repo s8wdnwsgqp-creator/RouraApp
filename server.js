@@ -12,44 +12,6 @@ const XLSX     = require('xlsx');
 const { execSync } = require('child_process');
 const os           = require('os');
 const archiver     = require('archiver');
-const { PDFDocument: LibPDFDoc } = require('pdf-lib');
-
-// ── CACHÉ EXCEL ──────────────────────────────────────────────────────────────
-// Evita descargar y parsear el xlsx en cada consulta.
-// Se invalida automáticamente cada EXCEL_CACHE_TTL ms o cuando cambie el nombre
-// del archivo (campo EXCEL_FILE).
-const EXCEL_CACHE_TTL = 5 * 60 * 1000; // 5 minutos
-let _excelCache = null; // { fileName, rows, ts }
-
-async function getExcelRows(ftpConfig, basePath, fileName) {
-  const now = Date.now();
-  if (_excelCache && _excelCache.fileName === fileName && (now - _excelCache.ts) < EXCEL_CACHE_TTL) {
-    console.log('[excel-cache] HIT —', _excelCache.rows.length, 'filas, edad', Math.round((now - _excelCache.ts) / 1000), 's');
-    return _excelCache.rows;
-  }
-  console.log('[excel-cache] MISS — descargando', fileName, '...');
-  const client = new ftp.Client(120000);
-  client.ftp.verbose = false;
-  try {
-    await client.access(ftpConfig);
-    const pt = new PassThrough();
-    const chunks = [];
-    pt.on('data', c => chunks.push(c));
-    const done = new Promise((ok, fail) => { pt.on('end', ok); pt.on('error', fail); });
-    await client.downloadTo(pt, path.posix.join(basePath, fileName));
-    await done;
-    const buffer = Buffer.concat(chunks);
-    const workbook = XLSX.read(buffer, { type: 'buffer' });
-    const sheet = workbook.Sheets['DatosX3'];
-    if (!sheet) throw new Error('No se encontró la hoja DatosX3');
-    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-    _excelCache = { fileName, rows, ts: Date.now() };
-    console.log('[excel-cache] Cargado —', rows.length, 'filas');
-    return rows;
-  } finally {
-    client.close();
-  }
-}
 
 // ── Config ─────────────────────────────────────────────────
 const JWT_SECRET = process.env.JWT_SECRET || 'roura-cevasa-secret-2025';
@@ -592,10 +554,21 @@ app.post('/api/albaran', requireAuth, async (req, res) => {
           return Buffer.concat(chunks);
         }
 
-        // ── 1. Albarán ya disponible en pdfBuffer (en memoria) ──────────────────
-        // La fusión con el PDF de certificación se realiza en generarCertificacion
-        // usando pdf-lib, por lo que no es necesario subirlo al FTP ni convertirlo.
-        console.log('[cert] Albarán disponible en memoria:', pdfBuffer.length, 'bytes');
+        // ── 1. Convertir albarán PDF → imágenes PNG y subirlas a "Fotografias Pte Certificacion" ──
+        let albImagenesSubidas = 0;
+        try {
+          const albImgs = await pdfToImages(pdfBuffer);  // convierte cada página a PNG
+          await goTo(DIR_PTE_CERT);
+          const tsAlbImg = tsNombre(req.user.id || '');
+          for (let i = 0; i < albImgs.length; i++) {
+            const imgName = `${pedidoStr}_${tsAlbImg}_Albaran_Final_Trabajo_${String(i + 1).padStart(3, '0')}.png`;
+            await clientCert.uploadFrom(Readable.from(albImgs[i]), imgName);
+            albImagenesSubidas++;
+            console.log('[cert] Albarán imagen subida a Fotografias Pte Certificacion:', imgName);
+          }
+        } catch (eAlbCopy) {
+          console.warn('[cert] No se pudo subir imágenes del albarán:', eAlbCopy.message);
+        }
 
         // ── 2. Listar ZIPs del pedido en Fotografias Pte Certificacion ───────────
         let listPte = [];
@@ -675,13 +648,13 @@ app.post('/api/albaran', requireAuth, async (req, res) => {
         console.log('[cert] Fotos antes:', fotosAntesBufs.length, '| Fotos final:', fotosFinalBufs.length, '| Imágenes albarán:', albImgBufs.length);
 
         // ── 4. Generar PDF de certificación ───────────────────────────────────────
-        // Pasamos el PDF del albarán directamente (en memoria) — pdf-lib lo fusionará
-        const albaranBuf = pdfBuffer;
+        // Si tenemos imágenes del albarán del FTP, las usamos; si no, fallback al buffer en memoria
+        const albaranBuf = albImgBufs.length === 0 ? pdfBuffer : null;
         const fechaHora  = timestamp || new Date().toLocaleString('es-ES');
         const pdfCertBuf = await generarCertificacion({
           pedido: pedidoStr, datosExcel: datosExcel || {},
           fechaHora, operario: req.user.name,
-          fotosAntesBufs, fotosFinalBufs, albaranBuf, albImgBufs: []
+          fotosAntesBufs, fotosFinalBufs, albaranBuf, albImgBufs
         });
 
         // ── 5. Subir la certificación ──────────────────────────────────────────────
@@ -918,24 +891,45 @@ app.get('/api/buscar-pedido', requireAuth, async (req, res) => {
   if (!numeroPedido) return res.status(400).json({ success: false, error: 'Falta número de pedido' });
 
   const EXCEL_FILE = 'vw_segplazo_052025.xlsx';
+  const REMOTE_PATH = path.posix.join(BASE_PATH, EXCEL_FILE);
+
+  const client = new ftp.Client(60000);
+  client.ftp.verbose = false;
 
   try {
-    // Usa caché — solo descarga del FTP si han pasado más de 5 min o es la primera vez
-    const rows = await getExcelRows(FTP_CONFIG, BASE_PATH, EXCEL_FILE);
+    await client.access(FTP_CONFIG);
 
+    // Download the Excel file into a buffer via PassThrough stream
+    const { PassThrough } = require('stream');
+    const pt = new PassThrough();
+    const chunks = [];
+    pt.on('data', c => chunks.push(c));
+    const finished = new Promise((resolve, reject) => { pt.on('end', resolve); pt.on('error', reject); });
+    await client.downloadTo(pt, REMOTE_PATH);
+    await finished;
+    const buffer = Buffer.concat(chunks);
+
+    // Parse with xlsx
+    const workbook = XLSX.read(buffer, { type: 'buffer' });
+    const sheet = workbook.Sheets['DatosX3'];
+    if (!sheet) return res.status(404).json({ success: false, error: 'No se encontro la hoja DatosX3 en el archivo Excel' });
+
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+    // Search column A (index 0) for the order number, skip header row
     let found = null;
     for (let i = 1; i < rows.length; i++) {
       const cellA = String(rows[i][0] || '').trim();
       if (cellA === numeroPedido) {
         const row = rows[i];
         found = {
-          SIE:         String(row[1]  || '').trim(),  // Columna B
-          RefCli:      String(row[2]  || '').trim(),  // Columna C
-          PA:          String(row[4]  || '').trim(),  // Columna E
-          Ciudad:      String(row[5]  || '').trim(),  // Columna F
-          Direccion:   String(row[6]  || '').trim(),  // Columna G
-          Provincia:   String(row[7]  || '').trim(),  // Columna H
-          Descripcion: String(row[8]  || '').trim(),  // Columna I
+          SIE:        String(row[1]  || '').trim(),  // Columna B
+          RefCli:     String(row[2]  || '').trim(),  // Columna C
+          PA:         String(row[4]  || '').trim(),  // Columna E
+          Ciudad:     String(row[5]  || '').trim(),  // Columna F
+          Direccion:  String(row[6]  || '').trim(),  // Columna G
+          Provincia:  String(row[7]  || '').trim(),  // Columna H
+          Descripcion: String(row[8] || '').trim(),  // Columna I
         };
         break;
       }
@@ -948,14 +942,9 @@ app.get('/api/buscar-pedido', requireAuth, async (req, res) => {
     res.json({ success: true, found: true, datos: found });
   } catch (e) {
     res.status(500).json({ success: false, error: 'Error accediendo al Excel: ' + e.message });
+  } finally {
+    client.close();
   }
-});
-
-// ── INVALIDAR CACHÉ EXCEL (admin) ─────────────────────────────
-app.post('/api/admin/invalidar-cache-excel', requireAdmin, (req, res) => {
-  _excelCache = null;
-  console.log('[excel-cache] Invalidado manualmente por admin');
-  res.json({ success: true, message: 'Caché Excel invalidado. La próxima consulta descargará el archivo.' });
 });
 
 
@@ -1100,127 +1089,28 @@ async function pdfToImages(pdfBuffer) {
   return images;
 }
 
-// ── FUSIONAR PDF CERTIFICACION + PDF ALBARÁN usando pdf-lib ─────────────────
-// Inserta las páginas del albarán justo después de la portada de sección 3.
-// La portada de sección 3 siempre es la última página antes del albarán.
-async function insertAlbaranPages(certBuf, albaranBuf) {
-  try {
-    const certDoc    = await LibPDFDoc.load(certBuf);
-    const albDoc     = await LibPDFDoc.load(albaranBuf);
-    const totalCert  = certDoc.getPageCount();
-
-    // Copiar todas las páginas del albarán al doc de certificación
-    const albPageIdxs = albDoc.getPageIndices();
-    const copiedPages = await certDoc.copyPages(albDoc, albPageIdxs);
-
-    // La portada de sección 3 (albarán) es la última página del certDoc ahora.
-    // Las insertamos a partir de esa posición + 1.
-    // NOTA: en el flujo actual la portada de sección 3 se añade antes de sec 4,
-    // así que insertamos las páginas del albarán antes de la sección 4.
-    // Calculamos la posición: totalCert páginas actuales en certDoc incluyen
-    // la portada de sec 3 y las secciones siguientes (sec 4).
-    // Buscamos la portada de sec 3 por posición: es la página inmediatamente
-    // anterior a la portada de sec 4.  Para simplificar, la insertamos justo
-    // después de la última página actual (certDoc ya tiene sec 3 portada como
-    // penúltima sección y sec 4 al final). Reordenamos:
-    //  páginas 0..N-1 → ya en certDoc (portada, sec1, sec2, sec3_cover, sec4)
-    //  queremos: portada, sec1, sec2, sec3_cover, [albaran pages], sec4
-    //
-    // Encontrar índice de la portada de sec 4 (la detectamos buscando la
-    // portada de sec 3 como página en posición totalCert-1 antes de sec4).
-    // Estrategia simple: insertamos albaran ANTES de la última sección (sec4).
-    // La sec4 empieza en el índice donde se añadió drawSectionCover(4,...).
-    // Contamos: portada(1) + sec1_cover(1)+sec1_fotos + sec2_cover(1)+sec2_fotos
-    //           + sec3_cover(1) = posición de inserción = totalCert - páginas_sec4.
-    // Como no sabemos páginas_sec4 aquí, usamos una marca más simple:
-    // insertamos DESPUÉS de la portada de sec3, que es la página en
-    // posición (totalCert - 1 - páginas_sec4).
-    // La forma más robusta: sec4 empieza en totalCert - (1 + fotosFinalCount).
-    // Pero no tenemos fotosFinalCount aquí.  Alternativa: insertar ANTES de
-    // las últimas (1 + fotosFinalCount) páginas, pero no lo sabemos.
-    //
-    // Solución final más simple: el albarán va ANTES de sec4, así que
-    // insertamos en posición = totalCert - sec4Pages.
-    // Como tampoco lo sabemos, hacemos lo siguiente: ponemos las páginas del
-    // albarán ENTRE la portada de sec3 y lo que sigue, buscando la portada por
-    // su marcador de metadatos __albaranInsertAfter__ que ponemos en el PDF.
-    // Si no está, insertamos antes de la última sección (páginas del sec4+cover).
-    //
-    // IMPLEMENTACIÓN REAL: generarCertificacion pone las páginas del albarán
-    // en un punto MARCADO. Lo más sencillo es que el PDFKit genere sec3_cover
-    // como la ÚLTIMA página, y sec4 también, y sepamos que el albarán va en
-    // posición totalCert-sec4PageCount. Pero para no cambiar toda la firma de
-    // generarCertificacion, usaremos la POSICIÓN que nos pasa el llamador.
-    //
-    // Por eso esta función recibe también insertAfterPage.
-    console.log('[pdf-lib] Fusionando: certDoc', totalCert, 'páginas + albarán', copiedPages.length, 'páginas');
-    // Las páginas del albarán se insertan entre portada de sec3 y portada de sec4
-    // El llamador pasa insertAfterPage = índice de la portada de sec3.
-    return { certDoc, copiedPages };
-  } catch(e) {
-    console.error('[pdf-lib] Error fusionando:', e.message);
-    throw e;
-  }
-}
-
-async function mergeCertConAlbaran(certBuf, albaranBuf, insertAfterPage) {
-  // insertAfterPage: índice 0-based de la portada de sección 3.
-  // Las páginas del albarán se insertan después de esa página.
-  const certDoc    = await LibPDFDoc.load(certBuf);
-  const albDoc     = await LibPDFDoc.load(albaranBuf);
-  const copiedPages = await certDoc.copyPages(albDoc, albDoc.getPageIndices());
-
-  // Insertar páginas del albarán después de insertAfterPage
-  for (let i = 0; i < copiedPages.length; i++) {
-    certDoc.insertPage(insertAfterPage + 1 + i, copiedPages[i]);
-  }
-
-  const merged = await certDoc.save();
-  console.log('[pdf-lib] PDF fusionado:', certDoc.getPageCount(), 'páginas totales');
-  return Buffer.from(merged);
-}
-
 // ── GENERADOR PDF CERTIFICACION ───────────────────────────────
 async function generarCertificacion({ pedido, datosExcel, fechaHora, operario, fotosAntesBufs, fotosFinalBufs, albaranBuf, albImgBufs }) {
 
-  // El albarán se inserta como PDF nativo usando pdf-lib DESPUÉS de generar el PDF principal.
-  // Ya no convertimos a imágenes. Solo necesitamos el buffer del PDF del albarán.
-  let albaranPdfBuf = null;
-  if (albaranBuf) {
-    albaranPdfBuf = albaranBuf;
+  // Usar imágenes PNG del albarán subidas al FTP si están disponibles;
+  // si no, convertir el buffer PDF en memoria (fallback)
+  let albaranImagenes = [];
+  if (albImgBufs && albImgBufs.length > 0) {
+    // Ya tenemos las imágenes descargadas del FTP — usarlas directamente
+    albaranImagenes = albImgBufs.map(f => f.buf);
+    console.log('[cert] Albarán: usando', albaranImagenes.length, 'imágenes del FTP');
+  } else if (albaranBuf) {
+    try {
+      albaranImagenes = await pdfToImages(albaranBuf);
+      console.log('[cert] Albarán: convertido desde PDF en memoria ->', albaranImagenes.length, 'páginas');
+    } catch (e) { console.warn('[cert] pdf2img error:', e.message); }
   }
-  // albImgBufs ya no se usa (las imágenes subidas al FTP eran un workaround;
-  // ahora trabajamos directamente con el PDF en memoria)
 
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 0, size: 'A4', autoFirstPage: true });
     const bufs = [];
     doc.on('data', c => bufs.push(c));
-    doc.on('end',  async () => {
-      let certBuf = Buffer.concat(bufs);
-      // Si tenemos el PDF del albarán, fusionarlo con pdf-lib
-      if (albaranPdfBuf) {
-        try {
-          // Calcular en qué página va la portada de sección 3.
-          // Estructura: portada(1) + sec1_cover+páginas + sec2_cover+páginas_antes
-          //             + sec3_cover(1) + sec4_cover+páginas_final
-          // Contamos: 1 + (1+fotosAntesBufs.length||1) + sec3_cover = 3 + fotosAntes_len
-          // Simplificamos: cargamos el certBuf con pdf-lib para saber el total
-          // y buscamos la portada de sec3 = total_páginas - (1 + págs_sec4)
-          // = total - 1 - (fotosFinalBufs.length || 1)
-          const tmpDoc    = await LibPDFDoc.load(certBuf);
-          const totalPags = tmpDoc.getPageCount();
-          const paginasSec4 = 1 + (fotosFinalBufs.length > 0 ? fotosFinalBufs.length : 1);
-          const insertAfter = totalPags - paginasSec4 - 1; // índice 0-based de sec3 cover
-          console.log('[pdf-lib] total pags certKit:', totalPags,
-            '| pags sec4:', paginasSec4, '| insertar después de página:', insertAfter);
-          certBuf = await mergeCertConAlbaran(certBuf, albaranPdfBuf, insertAfter);
-        } catch (eMerge) {
-          console.error('[pdf-lib] Fallo en fusión — se entrega certificación sin albarán embebido:', eMerge.message);
-        }
-      }
-      resolve(certBuf);
-    });
+    doc.on('end',  () => resolve(Buffer.concat(bufs)));
     doc.on('error', reject);
 
     // ── Constantes de página ───────────────────────────────
@@ -1478,15 +1368,45 @@ async function generarCertificacion({ pedido, datosExcel, fechaHora, operario, f
     }
 
     // ══════════════════════════════════════════════════════
-    // SECCIÓN 3 — ALBARÁN TRABAJOS (portada marcadora)
-    // Las páginas reales del albarán PDF se fusionan después
-    // de esta portada usando pdf-lib.
+    // SECCIÓN 3 — ALBARÁN TRABAJOS
     // ══════════════════════════════════════════════════════
-    let sec3CoverPageIndex = -1;  // se asignará tras doc.end()
     {
+      // Portada sección
       doc.addPage();
       drawSectionCover(3, 'Albarán Trabajos', 'Albarán de instalación firmado por el cliente');
-      // Nota: el nº de página real se calcula al finalizar el PDF
+
+      if (albaranImagenes.length === 0) {
+        doc.addPage();
+        drawMiniHeader('3 — Albarán Trabajos');
+        doc.font('Helvetica').fontSize(13).fillColor(TEXTGRAY)
+           .text('No se encontró el albarán para este pedido.', M, H / 2 - 20, { width: CW, align: 'center' });
+        drawPie(`3 — Albarán Trabajos  ·  Pedido: ${pedido}  ·  ${fechaHora}`);
+      } else {
+        // Una página del albarán por página del PDF, máxima calidad
+        albaranImagenes.forEach((imgBuf, i) => {
+          doc.addPage();
+          drawMiniHeader('3 — Albarán Trabajos');
+          drawFotoPie(i + 1, albaranImagenes.length, '3 — Albarán Trabajos');
+
+          // Página del albarán centrada al máximo
+          const areaY = FOTO_AREA_Y;
+          const areaH = FOTO_AREA_H - 4;
+          const areaW = CW;
+          doc.rect(M, areaY, areaW, areaH).fill('#f8fafc');
+          try {
+            doc.image(imgBuf, M + 2, areaY + 2, {
+              width:  areaW - 4,
+              height: areaH - 4,
+              fit:    [areaW - 4, areaH - 4],
+              align:  'center',
+              valign: 'center'
+            });
+          } catch (_) {
+            doc.font('Helvetica').fontSize(11).fillColor(TEXTGRAY)
+               .text('Página de albarán no disponible', M, areaY + areaH / 2 - 8, { width: CW, align: 'center' });
+          }
+        });
+      }
     }
 
     // ══════════════════════════════════════════════════════
