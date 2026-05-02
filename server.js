@@ -554,16 +554,20 @@ app.post('/api/albaran', requireAuth, async (req, res) => {
           return Buffer.concat(chunks);
         }
 
-        // ── 1. Subir el albarán a "Fotografias Pte Certificacion" como ZIP ───────
-        let albZipName = '';
+        // ── 1. Convertir albarán PDF → imágenes PNG y subirlas a "Fotografias Pte Certificacion" ──
+        let albImagenesSubidas = 0;
         try {
-          const albZipBuf = await crearZipBuffer([{ name: pdfName, buffer: pdfBuffer }]);
-          albZipName = `${pedidoStr}_${tsNombre(req.user.id || '')}_Albaran_Final_Trabajo.zip`;
+          const albImgs = await pdfToImages(pdfBuffer);  // convierte cada página a PNG
           await goTo(DIR_PTE_CERT);
-          await clientCert.uploadFrom(Readable.from(albZipBuf), albZipName);
-          console.log('[cert] Albarán copiado a Fotografias Pte Certificacion:', albZipName);
+          const tsAlbImg = tsNombre(req.user.id || '');
+          for (let i = 0; i < albImgs.length; i++) {
+            const imgName = `${pedidoStr}_${tsAlbImg}_Albaran_Final_Trabajo_${String(i + 1).padStart(3, '0')}.png`;
+            await clientCert.uploadFrom(Readable.from(albImgs[i]), imgName);
+            albImagenesSubidas++;
+            console.log('[cert] Albarán imagen subida a Fotografias Pte Certificacion:', imgName);
+          }
         } catch (eAlbCopy) {
-          console.warn('[cert] No se pudo copiar albarán:', eAlbCopy.message);
+          console.warn('[cert] No se pudo subir imágenes del albarán:', eAlbCopy.message);
         }
 
         // ── 2. Listar ZIPs del pedido en Fotografias Pte Certificacion ───────────
@@ -588,12 +592,12 @@ app.post('/api/albaran', requireAuth, async (req, res) => {
         // ── 3. Descargar y clasificar archivos del pedido ─────────────────────────
         const fotosAntesBufs = [];
         const fotosFinalBufs = [];
-        const albaranBuf     = pdfBuffer; // albarán ya en memoria, no hace falta descargarlo
+        const albImgBufs     = [];  // imágenes PNG del albarán (subidas en paso 1)
 
-        // 3a. Procesar ZIPs (compatibilidad con versiones anteriores)
+        // 3a. Procesar ZIPs legacy (compatibilidad con versiones anteriores)
         for (const zipFile of zipsDePedido) {
           if (/Albaran_Final_Trabajo/i.test(zipFile.name)) {
-            console.log('[cert] Albarán ZIP omitido (buffer en memoria):', zipFile.name);
+            console.log('[cert] Albarán ZIP legacy omitido (se usa versión imagen):', zipFile.name);
             continue;
           }
           try {
@@ -623,28 +627,34 @@ app.post('/api/albaran', requireAuth, async (req, res) => {
           }
         }
 
-        // 3b. Procesar imágenes directas (nuevo comportamiento)
+        // 3b. Procesar imágenes directas (fotos y albarán)
         for (const imgFile of imgsDePedido.sort((a, b) => a.name.localeCompare(b.name))) {
-          if (/Albaran_Final_Trabajo/i.test(imgFile.name)) continue;
           try {
             await goTo(DIR_PTE_CERT);
             const buf = await downloadFile(imgFile.name);
-            const esAntes = /Fotografias_Antes/i.test(imgFile.name);
-            if (esAntes) fotosAntesBufs.push({ name: imgFile.name, buf });
-            else         fotosFinalBufs.push({ name: imgFile.name, buf });
-            console.log('[cert] Imagen directa', imgFile.name, '(', esAntes ? 'ANTES' : 'FINAL', ')');
+            if (/Albaran_Final_Trabajo/i.test(imgFile.name)) {
+              albImgBufs.push({ name: imgFile.name, buf });
+              console.log('[cert] Imagen albarán descargada:', imgFile.name);
+            } else {
+              const esAntes = /Fotografias_Antes/i.test(imgFile.name);
+              if (esAntes) fotosAntesBufs.push({ name: imgFile.name, buf });
+              else         fotosFinalBufs.push({ name: imgFile.name, buf });
+              console.log('[cert] Imagen directa', imgFile.name, '(', esAntes ? 'ANTES' : 'FINAL', ')');
+            }
           } catch (eImg) {
             console.warn('[cert] Error descargando imagen directa', imgFile.name, ':', eImg.message);
           }
         }
-        console.log('[cert] Fotos antes:', fotosAntesBufs.length, '| Fotos final:', fotosFinalBufs.length, '| Albarán OK:', !!albaranBuf);
+        console.log('[cert] Fotos antes:', fotosAntesBufs.length, '| Fotos final:', fotosFinalBufs.length, '| Imágenes albarán:', albImgBufs.length);
 
         // ── 4. Generar PDF de certificación ───────────────────────────────────────
+        // Si tenemos imágenes del albarán del FTP, las usamos; si no, fallback al buffer en memoria
+        const albaranBuf = albImgBufs.length === 0 ? pdfBuffer : null;
         const fechaHora  = timestamp || new Date().toLocaleString('es-ES');
         const pdfCertBuf = await generarCertificacion({
           pedido: pedidoStr, datosExcel: datosExcel || {},
           fechaHora, operario: req.user.name,
-          fotosAntesBufs, fotosFinalBufs, albaranBuf
+          fotosAntesBufs, fotosFinalBufs, albaranBuf, albImgBufs
         });
 
         // ── 5. Subir la certificación ──────────────────────────────────────────────
@@ -1003,22 +1013,43 @@ app.post('/api/certificacion', requireAuth, async (req, res) => {
       } catch (_) {}
     }
 
-    // ── Descargar el albarán más reciente de albaran_instalacion ──
-    let albaranBuf = null;
-    const listAlb = await ftpListSafe(client, dirAlbaran);
-    const pdfsAlb = listAlb
-      .filter(f => f.type !== 2 && /\.pdf$/i.test(f.name))
-      .sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt));
-    if (pdfsAlb.length > 0) {
+    // ── Buscar imágenes PNG del albarán en Fotografias Pte Certificacion ──
+    const dirPteCert = path.posix.join(BASE_PATH, 'Fotografias Pte Certificacion');
+    const pedidoStr  = String(pedido).trim();
+    const listPteCert = await ftpListSafe(client, dirPteCert);
+    const albImgBufs = [];
+    const albImgsEnPte = listPteCert
+      .filter(f => f.type !== 2 && esImagen(f.name) && /Albaran_Final_Trabajo/i.test(f.name)
+               && (f.name.startsWith(pedidoStr + '_') || f.name.startsWith(pedidoStr + ' ')))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    for (const f of albImgsEnPte) {
       try {
-        albaranBuf = await ftpDownloadBuffer(client, path.posix.join(dirAlbaran, pdfsAlb[0].name));
+        const buf = await ftpDownloadBuffer(client, path.posix.join(dirPteCert, f.name));
+        albImgBufs.push({ name: f.name, buf });
+        console.log('[cert-manual] Imagen albarán encontrada en Pte Cert:', f.name);
       } catch (_) {}
+    }
+
+    // ── Si no hay imágenes del albarán, buscar el PDF en Albaranes Final Trabajo ──
+    let albaranBuf = null;
+    if (albImgBufs.length === 0) {
+      const listAlb = await ftpListSafe(client, dirAlbaran);
+      const pdfsAlb = listAlb
+        .filter(f => f.type !== 2 && /\.pdf$/i.test(f.name)
+                  && (f.name.startsWith(pedidoStr + '_') || f.name.startsWith(pedidoStr + ' ')))
+        .sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt));
+      if (pdfsAlb.length > 0) {
+        try {
+          albaranBuf = await ftpDownloadBuffer(client, path.posix.join(dirAlbaran, pdfsAlb[0].name));
+          console.log('[cert-manual] Albarán PDF descargado de Albaranes Final Trabajo:', pdfsAlb[0].name);
+        } catch (_) {}
+      }
     }
 
     // ── Generar PDF de Certificación ──────────────────────
     const pdfBuf = await generarCertificacion({
       pedido, datosExcel, fechaHora, operario,
-      fotosAntesBufs, fotosFinalBufs, albaranBuf
+      fotosAntesBufs, fotosFinalBufs, albaranBuf, albImgBufs
     });
 
     // ── Subir al FTP en carpeta Estándar como ZIP ─────────
@@ -1059,12 +1090,20 @@ async function pdfToImages(pdfBuffer) {
 }
 
 // ── GENERADOR PDF CERTIFICACION ───────────────────────────────
-async function generarCertificacion({ pedido, datosExcel, fechaHora, operario, fotosAntesBufs, fotosFinalBufs, albaranBuf }) {
+async function generarCertificacion({ pedido, datosExcel, fechaHora, operario, fotosAntesBufs, fotosFinalBufs, albaranBuf, albImgBufs }) {
 
-  // Convertir albarán PDF → imágenes antes de crear el documento PDFKit
+  // Usar imágenes PNG del albarán subidas al FTP si están disponibles;
+  // si no, convertir el buffer PDF en memoria (fallback)
   let albaranImagenes = [];
-  if (albaranBuf) {
-    try { albaranImagenes = await pdfToImages(albaranBuf); } catch (e) { console.warn('pdf2img error:', e.message); }
+  if (albImgBufs && albImgBufs.length > 0) {
+    // Ya tenemos las imágenes descargadas del FTP — usarlas directamente
+    albaranImagenes = albImgBufs.map(f => f.buf);
+    console.log('[cert] Albarán: usando', albaranImagenes.length, 'imágenes del FTP');
+  } else if (albaranBuf) {
+    try {
+      albaranImagenes = await pdfToImages(albaranBuf);
+      console.log('[cert] Albarán: convertido desde PDF en memoria ->', albaranImagenes.length, 'páginas');
+    } catch (e) { console.warn('[cert] pdf2img error:', e.message); }
   }
 
   return new Promise((resolve, reject) => {
