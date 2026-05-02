@@ -570,6 +570,22 @@ tr:hover .dld-btn{opacity:1}
       <div class="sec-title" style="font-size:15px">📝 Observaciones del Trabajo</div>
       <div class="form-group"><div class="form-label">Descripción del trabajo realizado</div><textarea class="form-textarea" id="txtObservaciones" placeholder="Describe los trabajos realizados, incidencias o cualquier observación relevante..." rows="6"></textarea></div>
       <div style="display:flex;align-items:center;gap:10px"><button class="mic-btn" id="micBtn" onclick="toggleMic()">🎤 Dictar por micrófono</button><span id="micStatus" style="font-size:11px;color:var(--text-muted);font-weight:500"></span></div>
+
+      <!-- Albarán: texto o fotografías físicas -->
+      <div class="form-group">
+        <div class="form-label">🧾 Número de Albarán (si corresponde)</div>
+        <input type="text" id="txtNumAlbaran" class="form-input" placeholder="Introduce el número de albarán" style="margin-bottom:8px"/>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <button class="btn" onclick="solicitarFotosAlbaranFisico()" type="button" title="Solo si no hay alternativa al albarán en papel">📷 Fotografiar albarán físico</button>
+          <span style="font-size:11px;color:var(--text-muted)">(Solo si no es posible introducir el número en texto)</span>
+        </div>
+        <div id="albaranFisicoPreview" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px"></div>
+        <div id="albaranFisicoStatus" style="margin-top:6px"></div>
+        <!-- Input oculto para cámara/galería albarán -->
+        <input type="file" id="inputAlbaranFisicoCamara" accept="image/*" capture="environment" multiple style="display:none"/>
+        <input type="file" id="inputAlbaranFisicoGaleria" accept="image/*" multiple style="display:none"/>
+      </div>
+
       <button class="btn btn-primary btn-full btn-lg" onclick="albaranGoStep(2)">Siguiente: Firma del Cliente →</button>
     </div>
     <div id="albaranStep2" style="display:none;flex-direction:column;gap:18px">
@@ -622,15 +638,49 @@ tr:hover .dld-btn{opacity:1}
 <!-- ADMIN USUARIOS -->
 <div id="screenUsuarios" class="screen">
   <div class="sub-bar"><button class="back-btn" onclick="nav('home')">← Inicio</button><span class="breadcrumb">Inicio › <span>Gestión de Usuarios</span></span></div>
-  <div class="page-wrap" style="max-width:760px">
+  <div class="page-wrap" style="max-width:860px">
     <div class="sec-row"><div class="sec-title" style="font-size:16px">👥 Usuarios del sistema</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn" onclick="exportarUsuarios()" title="Descargar backup de usuarios y contraseñas">⬇ Exportar usuarios</button>
-        <label class="btn" style="cursor:pointer;margin:0" title="Cargar backup de usuarios desde fichero">⬆ Importar usuarios<input type="file" id="importUsersFile" accept=".json" style="display:none" onchange="importarUsuarios(this)"></label>
+        <button class="btn" onclick="exportarUsuariosExcel()" title="Exportar usuarios a Excel con todos los campos">⬇ Exportar Excel</button>
+        <label class="btn" style="cursor:pointer;margin:0" title="Importar usuarios desde Excel">⬆ Importar Excel<input type="file" id="importUsersExcelFile" accept=".xlsx,.xls" style="display:none" onchange="importarUsuariosExcel(this)"></label>
+        <button class="btn" onclick="exportarUsuarios()" title="Backup JSON">⬇ Backup JSON</button>
+        <label class="btn" style="cursor:pointer;margin:0" title="Restaurar desde backup JSON">⬆ Restaurar JSON<input type="file" id="importUsersFile" accept=".json" style="display:none" onchange="importarUsuarios(this)"></label>
         <button class="btn btn-primary" onclick="openModalNuevoUsuario()">＋ Nuevo usuario</button>
       </div>
     </div>
     <div id="usersTableWrap"><div class="exp-loading active" style="padding:30px"><div class="spinner"></div></div></div>
+  </div>
+</div>
+
+<!-- EXPEDICIONES SCREEN — pedido confirmado, mostrar info y subir fotos -->
+<div id="screenExpediciones" class="screen">
+  <div class="sub-bar"><button class="back-btn" onclick="nav('home')">← Inicio</button><span class="breadcrumb">Inicio › <span>Expediciones</span></span></div>
+  <div class="page-wrap" style="max-width:600px">
+    <div style="display:flex;align-items:center;gap:14px;padding:18px;background:linear-gradient(135deg,#0d3f68,#1B6CA8);border-radius:var(--radius-lg);color:#fff;margin-bottom:4px">
+      <div style="font-size:40px">🚛</div>
+      <div>
+        <div style="font-size:19px;font-weight:800">Expedición — Pedido <span id="expedPedNum">—</span></div>
+        <div style="font-size:12px;opacity:.75;margin-top:3px">Datos del pedido confirmados en el sistema</div>
+      </div>
+    </div>
+    <div id="expedDatosBox" style="background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius-sm);overflow:hidden"></div>
+    <div style="margin-top:8px">
+      <div class="form-label" style="margin-bottom:8px">📸 Fotografías de la Expedición</div>
+      <div class="upload-zone" id="expedUploadZone">
+        <div class="uz-icon">🚛</div>
+        <div class="uz-text">Carga o toma las fotografías de la expedición</div>
+        <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:10px">
+          <label class="btn btn-primary" style="cursor:pointer">📷 Cámara<input type="file" id="expedCamara" accept="image/*" capture="environment" multiple style="display:none"></label>
+          <label class="btn" style="cursor:pointer">🖼 Galería<input type="file" id="expedGaleria" accept="image/*" multiple style="display:none"></label>
+        </div>
+      </div>
+      <div id="expedPreview" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px"></div>
+    </div>
+    <div id="expedStatus" style="margin-top:8px"></div>
+    <div style="margin-top:8px">
+      <button class="btn btn-success btn-full btn-lg" id="btnExpedSubir" onclick="expedSubirFotos()" disabled>🚛 Subir Fotografías de Expedición al Servidor</button>
+    </div>
+    <div id="expedLotesWrap" style="display:none;margin-top:12px"><div class="lote-panel"><div class="lote-panel-header">Lotes subidos correctamente</div><div id="expedLotesList"></div></div></div>
   </div>
 </div>
 
@@ -652,14 +702,25 @@ tr:hover .dld-btn{opacity:1}
 
 <!-- MODALES -->
 <div class="modal-overlay" id="modalNuevoUsuario">
-  <div class="modal">
+  <div class="modal" style="max-width:520px">
     <div class="modal-title">👤 Crear Nuevo Usuario</div>
-    <div class="modal-body" style="margin-bottom:16px">Complete los datos del nuevo usuario del sistema.</div>
-    <div style="display:flex;flex-direction:column;gap:14px">
-      <div class="form-group"><div class="form-label">Nombre completo</div><input type="text" id="nuNombre" class="form-input" placeholder="Nombre Apellido"/></div>
-      <div class="form-group"><div class="form-label">Usuario (login)</div><input type="text" id="nuUsername" class="form-input" placeholder="usuario123" autocapitalize="none"/></div>
-      <div class="form-group"><div class="form-label">Contraseña</div><input type="password" id="nuPassword" class="form-input" placeholder="Mínimo 4 caracteres"/></div>
-      <div class="form-group"><div class="form-label">Rol</div><select id="nuRol" class="form-select"><option value="user">Usuario</option><option value="admin">Administrador</option></select></div>
+    <div class="modal-body" style="margin-bottom:12px">Complete los datos del nuevo usuario del sistema.</div>
+    <div style="display:flex;flex-direction:column;gap:10px;max-height:65vh;overflow-y:auto;padding-right:4px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-group"><div class="form-label">Nombre *</div><input type="text" id="nuNombre" class="form-input" placeholder="Nombre"/></div>
+        <div class="form-group"><div class="form-label">Apellidos</div><input type="text" id="nuApellidos" class="form-input" placeholder="Apellidos"/></div>
+      </div>
+      <div class="form-group"><div class="form-label">Email</div><input type="email" id="nuEmail" class="form-input" placeholder="correo@empresa.com"/></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-group"><div class="form-label">Id Delegación</div><input type="text" id="nuIdDelegacion" class="form-input" placeholder="DEL-001"/></div>
+        <div class="form-group"><div class="form-label">Id Instalador</div><input type="text" id="nuIdInstalador" class="form-input" placeholder="INS-001"/></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-group"><div class="form-label">Nivel de Acceso</div><input type="text" id="nuNivelAcceso" class="form-input" placeholder="1"/></div>
+        <div class="form-group"><div class="form-label">Rol del sistema</div><select id="nuRol" class="form-select"><option value="user">Usuario</option><option value="admin">Administrador</option></select></div>
+      </div>
+      <div class="form-group"><div class="form-label">Usuario (login) *</div><input type="text" id="nuUsername" class="form-input" placeholder="usuario123" autocapitalize="none"/></div>
+      <div class="form-group"><div class="form-label">Contraseña *</div><input type="password" id="nuPassword" class="form-input" placeholder="Mínimo 4 caracteres"/></div>
     </div>
     <div id="nuError" style="display:none;margin-top:12px" class="sbox err"></div>
     <div class="modal-actions"><button class="btn" onclick="closeModal('modalNuevoUsuario')">Cancelar</button><button class="btn btn-primary" id="btnNuConfirm" onclick="crearUsuario()">Crear usuario</button></div>
@@ -679,6 +740,24 @@ tr:hover .dld-btn{opacity:1}
     <div class="modal-title">🗑️ Eliminar Usuario</div>
     <div class="modal-body" id="modalBorrarBody"></div>
     <div class="modal-actions"><button class="btn" onclick="closeModal('modalBorrarUsuario')">Cancelar</button><button class="btn btn-danger" id="btnBorrarConfirm">Eliminar definitivamente</button></div>
+  </div>
+</div>
+
+<!-- MODAL ALBARÁN FÍSICO -->
+<div class="modal-overlay" id="modalAlbaranFisico">
+  <div class="modal">
+    <div class="modal-title">⚠️ Albarán Físico — Aviso Importante</div>
+    <div class="modal-body">
+      <div style="background:#fff3cd;border:1px solid #f0c040;border-radius:8px;padding:14px;margin-bottom:14px;font-size:13px;color:#7a4000">
+        <strong>⚠ ATENCIÓN:</strong> El albarán en formato físico (fotografía) <strong>únicamente se aceptará como última alternativa</strong>, cuando no sea posible introducir el número de albarán en formato texto digital.<br><br>
+        Si dispones del número de albarán, úsalo en el campo de texto. Las fotografías de albarán físico solo deben usarse si no hay otra alternativa.
+      </div>
+      ¿Deseas continuar y añadir fotografías del albarán físico (máximo 3)?
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('modalAlbaranFisico')">Cancelar — Usar texto</button>
+      <button class="btn btn-danger" onclick="closeModal('modalAlbaranFisico');abrirFotosAlbaranFisico()">Entendido — Añadir fotos</button>
+    </div>
   </div>
 </div>
 
@@ -1017,12 +1096,14 @@ function showApp(){
     addCard('c-orange', '📋', 'Informe Visitas',       'Visitas de Liderazgo e Inspecciones de Seguridad',            ()=>nav('informeVisitas'));
     addCard('c-blue',   '🗺️', 'Mapa en Tiempo Real',  'Ubicación de usuarios conectados',                            ()=>nav('mapa'));
     addCard('c-gold',   '👥', 'Gestión de Usuarios',  'Crear y eliminar usuarios del sistema',                       ()=>nav('usuarios'));
+    addCard('c-orange', '🚛', 'Expediciones',          'Registrar y fotografiar expediciones de pedidos',             ()=>startFlujo('expediciones'));
   } else {
-    // Usuario estándar: solo Cargar Ficheros, CFO y Mapa
+    // Usuario estándar: solo Cargar Ficheros, CFO, Mapa y Expediciones
     addCard('c-green',  '📤', 'Cargar Ficheros',      'Sube documentos y fotos de trabajos',                         ()=>nav('cargar'));
     addCard('c-purple', '🔍', 'CFO',                  'Visita CFO — Registro de incidencias y apertura de objeciones',()=>startFlujo('cfo'));
     addCard('c-orange', '📋', 'Informe Visitas',       'Visitas de Liderazgo e Inspecciones de Seguridad',            ()=>nav('informeVisitas'));
     addCard('c-blue',   '🗺️', 'Mapa en Tiempo Real',  'Ubicación de usuarios conectados',                            ()=>nav('mapa'));
+    addCard('c-orange', '🚛', 'Expediciones',          'Registrar y fotografiar expediciones de pedidos',             ()=>startFlujo('expediciones'));
   }
 
   initGeo();startPing();nav('home');
@@ -1071,7 +1152,7 @@ function initGeo(){
 // ── NAV ──────────────────────────────────────────────────────
 function nav(s,p){
   document.querySelectorAll('.screen').forEach(el=>el.classList.remove('active'));
-  const map={home:'screenHome',explorer:'screenExplorer',cargar:'screenCargar',pedido:'screenPedido',confirmPedido:'screenConfirmPedido',medicion:'screenMedicion',instalacion:'screenInstalacion',fotos:'screenFotos',fotosInst:'screenFotosInst',albaran:'screenAlbaran',usuarios:'screenUsuarios',mapa:'screenMapa',cfo:'screenCFO',cfoInc:'screenCFOInc',cierreCFO:'screenCierreCFO',informeVisitas:'screenInformeVisitas'};
+  const map={home:'screenHome',explorer:'screenExplorer',cargar:'screenCargar',pedido:'screenPedido',confirmPedido:'screenConfirmPedido',medicion:'screenMedicion',instalacion:'screenInstalacion',fotos:'screenFotos',fotosInst:'screenFotosInst',albaran:'screenAlbaran',usuarios:'screenUsuarios',mapa:'screenMapa',cfo:'screenCFO',cfoInc:'screenCFOInc',cierreCFO:'screenCierreCFO',informeVisitas:'screenInformeVisitas',expediciones:'screenExpediciones',expedFotos:'screenExpedFotos'};
   const el=document.getElementById(map[s]);if(el)el.classList.add('active');
   if(s==='explorer'&&expItems.length===0)expLoad('/');
   if(s==='fotos')setupFotosScreen(p);
@@ -1081,20 +1162,28 @@ function nav(s,p){
   if(s==='medicion'){document.getElementById('lbMedPed').textContent=currentPedido;document.getElementById('subMed').textContent='Pedido nº '+currentPedido;}
   if(s==='instalacion'){document.getElementById('lbInsPed').textContent=currentPedido;document.getElementById('subIns').textContent='Pedido nº '+currentPedido;}
   if(s==='cfo'){document.getElementById('lbCFOPed').textContent=currentPedido;document.getElementById('subCFO').textContent='Pedido nº '+currentPedido;}
+  if(s==='expediciones')setupExpedicionesScreen();
+  if(s==='expedFotos')setupExpedFotosScreen();
   if(s==='usuarios')loadUsers();
   if(s==='mapa'){initMap();startMapRefresh();}
   if(s!=='mapa')stopMapRefresh();
 }
-function startFlujo(t){currentFlujo=t;medFiles=[];medLotes=[];instFiles=[];instAntesLotes=[];instFinLotes=[];nav('pedido');}
+function startFlujo(t){
+  currentFlujo=t;medFiles=[];medLotes=[];instFiles=[];instAntesLotes=[];instFinLotes=[];
+  expedFiles=[];expedLotes=[];
+  if(t==='expediciones') nav('pedido');
+  else nav('pedido');
+}
 
 // ── PEDIDO ────────────────────────────────────────────────────
 function setupPedidoScreen(){
   const isIns=currentFlujo==='instalacion';
   const isCFO=currentFlujo==='cfo';
-  document.getElementById('pedidoIcon').textContent=isCFO?'🔍':isIns?'🔧':'📐';
-  document.getElementById('pedidoTitle').textContent=isCFO?'Visita CFO':isIns?'Documentar Trabajo de Instalación':'Toma de Datos / Medición';
-  document.getElementById('pedidoBc').innerHTML=isCFO?`Inicio › CFO › <span>Número de Pedido</span>`:`Inicio › Cargar Ficheros › <span>${isIns?'Instalación':'Medición'}</span>`;
-  document.getElementById('pedidoBack').onclick=()=>nav(isCFO?'home':'cargar');
+  const isExp=currentFlujo==='expediciones';
+  document.getElementById('pedidoIcon').textContent=isCFO?'🔍':isIns?'🔧':isExp?'🚛':'📐';
+  document.getElementById('pedidoTitle').textContent=isCFO?'Visita CFO':isIns?'Documentar Trabajo de Instalación':isExp?'Expedición — Número de Pedido':'Toma de Datos / Medición';
+  document.getElementById('pedidoBc').innerHTML=isCFO?`Inicio › CFO › <span>Número de Pedido</span>`:isExp?`Inicio › Expediciones › <span>Número de Pedido</span>`:`Inicio › Cargar Ficheros › <span>${isIns?'Instalación':'Medición'}</span>`;
+  document.getElementById('pedidoBack').onclick=()=>nav(isCFO?'home':isExp?'home':'cargar');
   document.getElementById('inputPedido').value=currentPedido||'';
   setTimeout(()=>document.getElementById('inputPedido').focus(),200);
 }
@@ -1138,6 +1227,7 @@ function confirmPedidoAceptar(){
   currentDatosExcel=_lastDatosExcel||null;
   if(currentFlujo==='cfo') nav('cfo');
   else if(currentFlujo==='medicion') nav('medicion');
+  else if(currentFlujo==='expediciones') nav('expediciones');
   else nav('instalacion');
 }
 function confirmPedidoCancelar(){currentPedido='';nav('home');}
@@ -1461,7 +1551,17 @@ function renderUsersTable(users){
   html+=`</tbody></table></div>`;
   wrap.innerHTML=html;
 }
-function openModalNuevoUsuario(){['nuNombre','nuUsername','nuPassword'].forEach(id=>document.getElementById(id).value='');document.getElementById('nuRol').value='user';document.getElementById('nuError').style.display='none';document.getElementById('btnNuConfirm').disabled=false;document.getElementById('btnNuConfirm').textContent='Crear usuario';document.getElementById('modalNuevoUsuario').classList.add('open');setTimeout(()=>document.getElementById('nuNombre').focus(),200);}
+function openModalNuevoUsuario(){
+  ['nuNombre','nuApellidos','nuEmail','nuUsername','nuPassword','nuIdDelegacion','nuIdInstalador','nuNivelAcceso'].forEach(id=>{
+    const el=document.getElementById(id);if(el)el.value='';
+  });
+  document.getElementById('nuRol').value='user';
+  document.getElementById('nuError').style.display='none';
+  document.getElementById('btnNuConfirm').disabled=false;
+  document.getElementById('btnNuConfirm').textContent='Crear usuario';
+  document.getElementById('modalNuevoUsuario').classList.add('open');
+  setTimeout(()=>document.getElementById('nuNombre').focus(),200);
+}
 async function crearUsuario(){
   const nombre=document.getElementById('nuNombre').value.trim(),username=document.getElementById('nuUsername').value.trim(),password=document.getElementById('nuPassword').value,role=document.getElementById('nuRol').value;
   const errEl=document.getElementById('nuError');errEl.style.display='none';
@@ -2167,6 +2267,296 @@ async function cierreGenerarInforme() {
     statusEl.innerHTML = '<div class="sbox err">⚠ Error: ' + e.message + '</div>';
     btn.disabled = false; btn.textContent = '📄 Generar Informe Incidencias Resueltas';
   }
+}
+// Alias para compatibilidad con nueva tabla
+function borrarUsuario(id, username) { confirmarBorrar(id, username); }
+
+// ══════════════════════════════════════════════════════════
+// ── EXPEDICIONES JS ───────────────────────────────────────
+// ══════════════════════════════════════════════════════════
+let expedFiles = [];
+let expedLotes = [];
+
+function setupExpedicionesScreen() {
+  document.getElementById('expedPedNum').textContent = currentPedido || '—';
+  expedFiles = [];
+  document.getElementById('expedPreview').innerHTML = '';
+  document.getElementById('expedStatus').innerHTML = '';
+  document.getElementById('btnExpedSubir').disabled = true;
+  document.getElementById('expedLotesWrap').style.display = 'none';
+  document.getElementById('expedLotesList').innerHTML = '';
+
+  // Mostrar datos del pedido
+  const box = document.getElementById('expedDatosBox');
+  const d = currentDatosExcel || {};
+  box.innerHTML = ['SIE','RefCli','PA','Ciudad','Direccion','Provincia','Descripcion'].map(k =>
+    `<div class="confirm-field"><div class="confirm-field-label">${k}</div><div class="confirm-field-value">${d[k]||'—'}</div></div>`
+  ).join('');
+
+  // Bind inputs
+  const bindExp = (inputId) => {
+    const old = document.getElementById(inputId);
+    if (!old) return;
+    const fresh = old.cloneNode(true);
+    old.parentNode.replaceChild(fresh, old);
+    fresh.addEventListener('change', function() {
+      if (!this.files || !this.files.length) return;
+      Array.from(this.files).forEach(file => {
+        const reader = new FileReader();
+        reader.onload = async e => {
+          const dataUrl = file.type.startsWith('image/')
+            ? await comprimirDataUrl(e.target.result, file.name) : e.target.result;
+          expedFiles.push({ name: file.name.replace(/\.[^.]+$/, '.jpg'), dataUrl, type: 'image/jpeg' });
+          expedRenderPreview();
+        };
+        reader.readAsDataURL(file);
+      });
+      this.value = '';
+    });
+  };
+  bindExp('expedCamara');
+  bindExp('expedGaleria');
+}
+
+function expedRenderPreview() {
+  const cont = document.getElementById('expedPreview');
+  cont.innerHTML = '';
+  expedFiles.forEach((f, i) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'cfo-thumb-wrap';
+    if (f.dataUrl && f.type && f.type.startsWith('image/')) {
+      const img = document.createElement('img');
+      img.src = f.dataUrl; img.className = 'cfo-thumb';
+      wrap.appendChild(img);
+    } else {
+      const div = document.createElement('div'); div.className = 'cfo-doc-item';
+      div.innerHTML = '📄 ' + f.name.slice(0, 24);
+      wrap.appendChild(div);
+    }
+    const del = document.createElement('button');
+    del.className = 'del-btn'; del.textContent = '×';
+    del.onclick = () => { expedFiles.splice(i, 1); expedRenderPreview(); };
+    wrap.appendChild(del);
+    cont.appendChild(wrap);
+  });
+  document.getElementById('btnExpedSubir').disabled = expedFiles.length === 0;
+}
+
+async function expedSubirFotos() {
+  if (expedFiles.length === 0) { showToast('Añade fotografías antes de subir','err'); return; }
+  const btn = document.getElementById('btnExpedSubir');
+  const statusEl = document.getElementById('expedStatus');
+  btn.disabled = true; btn.textContent = '⏳ Subiendo fotografías...';
+  statusEl.innerHTML = '<div class="sbox info">⏳ Subiendo fotografías al servidor FTP...</div>';
+
+  try {
+    const res = await authFetch('/api/expediciones/fotos', {
+      method: 'POST',
+      body: JSON.stringify({ pedido: currentPedido, fotos: expedFiles })
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Error desconocido');
+
+    const ts = new Date().toLocaleString('es-ES');
+    document.getElementById('expedLotesWrap').style.display = '';
+    document.getElementById('expedLotesList').insertAdjacentHTML('beforeend',
+      `<div style="padding:10px;border-bottom:1px solid var(--border);font-size:12px">
+        <strong>✓ ${data.count} foto(s)</strong> — ${data.zipFile} — ${ts}
+      </div>`
+    );
+    statusEl.innerHTML = `<div class="sbox ok">✓ ${data.count} fotografía(s) subidas correctamente<br>📦 ${data.zipFile}</div>`;
+    showToast('✓ Expedición registrada correctamente', 'ok');
+    expedFiles = [];
+    expedRenderPreview();
+    btn.textContent = '✓ Subido. ＋ Subir más fotos';
+    btn.disabled = false;
+  } catch(e) {
+    statusEl.innerHTML = '<div class="sbox err">⚠ Error: ' + e.message + '</div>';
+    btn.disabled = false; btn.textContent = '🚛 Subir Fotografías de Expedición al Servidor';
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+// ── ALBARÁN FÍSICO JS ──────────────────────────────────────
+// ══════════════════════════════════════════════════════════
+let albaranFisicoFiles = [];
+
+function solicitarFotosAlbaranFisico() {
+  // Mostrar aviso modal primero
+  document.getElementById('modalAlbaranFisico').classList.add('open');
+}
+
+function abrirFotosAlbaranFisico() {
+  // Mostrar opciones para cámara/galería
+  const statusEl = document.getElementById('albaranFisicoStatus');
+  statusEl.innerHTML = `
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px">
+      <label class="btn btn-primary" style="cursor:pointer">📷 Cámara
+        <input type="file" accept="image/*" capture="environment" multiple style="display:none"
+          onchange="agregarFotosAlbaranFisico(this.files)">
+      </label>
+      <label class="btn" style="cursor:pointer">🖼 Galería
+        <input type="file" accept="image/*" multiple style="display:none"
+          onchange="agregarFotosAlbaranFisico(this.files)">
+      </label>
+      <span style="font-size:11px;color:var(--text-muted);align-self:center">Máx. 3 fotos</span>
+    </div>`;
+}
+
+function agregarFotosAlbaranFisico(files) {
+  if (!files || !files.length) return;
+  const remaining = 3 - albaranFisicoFiles.length;
+  if (remaining <= 0) { showToast('Máximo 3 fotos de albarán físico','err'); return; }
+  const toLoad = Array.from(files).slice(0, remaining);
+  toLoad.forEach(file => {
+    const reader = new FileReader();
+    reader.onload = async e => {
+      const dataUrl = file.type.startsWith('image/')
+        ? await comprimirDataUrl(e.target.result, file.name) : e.target.result;
+      albaranFisicoFiles.push({ name: 'albaran_fisico_' + (albaranFisicoFiles.length + 1) + '.jpg', dataUrl, type: 'image/jpeg' });
+      renderAlbaranFisicoPreview();
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderAlbaranFisicoPreview() {
+  const cont = document.getElementById('albaranFisicoPreview');
+  cont.innerHTML = '';
+  albaranFisicoFiles.forEach((f, i) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'cfo-thumb-wrap';
+    const img = document.createElement('img');
+    img.src = f.dataUrl; img.className = 'cfo-thumb';
+    wrap.appendChild(img);
+    const del = document.createElement('button');
+    del.className = 'del-btn'; del.textContent = '×';
+    del.onclick = () => { albaranFisicoFiles.splice(i, 1); renderAlbaranFisicoPreview(); };
+    wrap.appendChild(del);
+    cont.appendChild(wrap);
+  });
+  if (albaranFisicoFiles.length > 0) {
+    document.getElementById('albaranFisicoStatus').innerHTML =
+      `<div class="sbox ok" style="font-size:12px">✓ ${albaranFisicoFiles.length}/3 foto(s) de albarán físico añadidas</div>`;
+  }
+}
+
+// Hook into setupAlbaranScreen to reset albaranFisicoFiles
+const _origSetupAlbaran = setupAlbaranScreen;
+setupAlbaranScreen = function() {
+  _origSetupAlbaran();
+  albaranFisicoFiles = [];
+  const prev = document.getElementById('albaranFisicoPreview');
+  if (prev) prev.innerHTML = '';
+  const st = document.getElementById('albaranFisicoStatus');
+  if (st) st.innerHTML = '';
+  const num = document.getElementById('txtNumAlbaran');
+  if (num) num.value = '';
+};
+
+// ══════════════════════════════════════════════════════════
+// ── USUARIOS EXCEL EXPORT/IMPORT JS ───────────────────────
+// ══════════════════════════════════════════════════════════
+function exportarUsuariosExcel() {
+  const a = document.createElement('a');
+  a.href = `${API}/api/admin/users/export-excel`;
+  a.download = 'usuarios_export.xlsx';
+  a.click();
+}
+
+async function importarUsuariosExcel(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const res = await fetch(`${API}/api/admin/users/import-excel`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token },
+      body: fd
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error);
+    showToast(`✓ Importados: ${data.created} nuevos, ${data.updated} actualizados`, 'ok');
+    loadUsers();
+  } catch(e) {
+    showToast('Error importando Excel: ' + e.message, 'err');
+  }
+  input.value = '';
+}
+
+// Extended loadUsers to show new fields
+async function loadUsers() {
+  const wrap = document.getElementById('usersTableWrap');
+  wrap.innerHTML = '<div class="exp-loading active" style="padding:30px"><div class="spinner"></div></div>';
+  try {
+    const res = await authFetch('/api/admin/users');
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error);
+    const users = data.users;
+    if (!users.length) { wrap.innerHTML = '<div style="padding:20px;color:var(--text-muted);font-size:13px">No hay usuarios registrados.</div>'; return; }
+    wrap.innerHTML = `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="background:var(--brand3);color:#fff">
+        <th style="padding:8px;text-align:left">Usuario</th>
+        <th style="padding:8px;text-align:left">Nombre / Apellidos</th>
+        <th style="padding:8px;text-align:left">Email</th>
+        <th style="padding:8px;text-align:left">Id Deleg.</th>
+        <th style="padding:8px;text-align:left">Id Inst.</th>
+        <th style="padding:8px;text-align:left">Nivel</th>
+        <th style="padding:8px;text-align:left">Rol</th>
+        <th style="padding:8px"></th>
+      </tr></thead>
+      <tbody>
+        ${users.map(u => `
+          <tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:8px;font-weight:600;font-family:var(--mono);font-size:11px">${u.username}</td>
+            <td style="padding:8px">${u.name||''}${u.apellidos?' '+u.apellidos:''}</td>
+            <td style="padding:8px;color:var(--text-muted)">${u.email||'—'}</td>
+            <td style="padding:8px;color:var(--text-muted)">${u.id_delegacion||'—'}</td>
+            <td style="padding:8px;color:var(--text-muted)">${u.id_instalador||'—'}</td>
+            <td style="padding:8px;color:var(--text-muted)">${u.nivel_acceso||'—'}</td>
+            <td style="padding:8px"><span class="tb-role ${u.role==='admin'?'role-admin':'role-user'}">${u.role==='admin'?'Admin':'User'}</span></td>
+            <td style="padding:8px">
+              ${u.username!=='admin'?`<button class="btn btn-danger" style="font-size:11px;padding:4px 8px" onclick="borrarUsuario('${u.id}','${u.username}')">🗑</button>`:''}
+            </td>
+          </tr>`).join('')}
+      </tbody>
+    </table></div>`;
+  } catch(e) {
+    wrap.innerHTML = '<div style="padding:20px;color:var(--red)">' + e.message + '</div>';
+  }
+}
+
+// Override crearUsuario to include new fields
+async function crearUsuario() {
+  const nombre   = document.getElementById('nuNombre').value.trim();
+  const apellidos= document.getElementById('nuApellidos')?.value.trim()||'';
+  const email    = document.getElementById('nuEmail')?.value.trim()||'';
+  const username = document.getElementById('nuUsername').value.trim().toLowerCase();
+  const password = document.getElementById('nuPassword').value;
+  const rol      = document.getElementById('nuRol').value;
+  const idDel    = document.getElementById('nuIdDelegacion')?.value.trim()||'';
+  const idIns    = document.getElementById('nuIdInstalador')?.value.trim()||'';
+  const nivel    = document.getElementById('nuNivelAcceso')?.value.trim()||'';
+  const errEl    = document.getElementById('nuError');
+  const btn      = document.getElementById('btnNuConfirm');
+
+  if (!nombre || !username || !password) { errEl.textContent='Rellena nombre, usuario y contraseña.'; errEl.style.display=''; return; }
+  if (password.length < 4) { errEl.textContent='La contraseña debe tener al menos 4 caracteres.'; errEl.style.display=''; return; }
+  errEl.style.display='none'; btn.disabled=true; btn.textContent='Creando...';
+  try {
+    const res = await authFetch('/api/admin/users', { method:'POST', body:JSON.stringify({
+      username, password, name:nombre, role:rol,
+      email, apellidos, id_delegacion:idDel, id_instalador:idIns, nivel_acceso:nivel
+    })});
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error);
+    showToast('✓ Usuario creado correctamente','ok');
+    closeModal('modalNuevoUsuario');
+    loadUsers();
+  } catch(e) {
+    errEl.textContent=e.message; errEl.style.display='';
+  } finally { btn.disabled=false; btn.textContent='Crear usuario'; }
 }
 
 </script>
