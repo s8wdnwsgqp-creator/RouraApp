@@ -1593,35 +1593,29 @@ async function generarAlbaran(){
   document.getElementById('albaranStatus').innerHTML='<div class="sbox info">⏳ Generando PDF y guardando en el servidor...</div>';
   const canvas=document.getElementById('sigCanvas');let firma='';
   try{const tmp=document.createElement('canvas');tmp.width=canvas.width||400;tmp.height=canvas.height||170;const tc=tmp.getContext('2d');tc.fillStyle='#fff';tc.fillRect(0,0,tmp.width,tmp.height);tc.drawImage(canvas,0,0);firma=tmp.toDataURL('image/jpeg',.75);}catch(_){}
-  const payload={pedido:currentPedido,tipo:albaranTipo,observaciones:document.getElementById('txtObservaciones').value||'',clienteNombre:document.getElementById('clienteNombre').value||'',clienteDni:document.getElementById('clienteDni').value||'',firma,timestamp:new Date().toLocaleString('es-ES'),geoData:geoData||null};
+  const payload={pedido:currentPedido,tipo:albaranTipo,observaciones:document.getElementById('txtObservaciones').value||'',clienteNombre:document.getElementById('clienteNombre').value||'',clienteDni:document.getElementById('clienteDni').value||'',firma,timestamp:new Date().toLocaleString('es-ES'),geoData:geoData||null,datosExcel:currentDatosExcel||null};
   try{
+    if(albaranTipo==='instalacion'){
+      document.getElementById('albaranStatus').innerHTML='<div class="sbox info">⏳ Generando albarán y certificación completa (portada + fotos + albarán)... Esto puede tardar unos segundos.</div>';
+      btn.textContent='⏳ Generando certificación...';
+    }
     const res=await authFetch('/api/albaran',{method:'POST',body:JSON.stringify(payload)});
     let data;try{data=await res.json();}catch(_){throw new Error('Respuesta inesperada del servidor ('+res.status+')');}
     if(!data.success)throw new Error(data.error||'Error desconocido');
-    document.getElementById('albaranStatus').innerHTML='<div class="sbox ok">✓ Albarán <strong>'+data.fileName+'</strong> generado y guardado correctamente</div>';
-    showToast('✓ Albarán guardado','ok');
-    // Si es instalación, generar Certificación
     if(albaranTipo==='instalacion'){
-      btn.textContent='⏳ Generando certificación...';
-      document.getElementById('albaranStatus').innerHTML+='<div class="sbox info" style="margin-top:8px">⏳ Generando PDF de Certificación completo (portada + fotos + albarán)... Esto puede tardar unos segundos.</div>';
-      try{
-        const certRes=await authFetch('/api/certificacion',{method:'POST',body:JSON.stringify({
-          pedido:currentPedido,
-          datosExcel:currentDatosExcel||null,
-          albaranPath:data.ruta||null,
-          timestamp:new Date().toLocaleString('es-ES'),
-          operario:null
-        })});
-        const certData=await certRes.json();
-        if(certData.success){
-          document.getElementById('albaranStatus').innerHTML='<div class="sbox ok">✓ Albarán guardado<br>✓ Certificación <strong>'+certData.fileName+'</strong> generada y guardada en /www/DMA/Estándar/</div>';
-          showToast('✓ Certificación generada correctamente','ok');
-        } else {
-          document.getElementById('albaranStatus').innerHTML+='<div class="sbox err" style="margin-top:8px">⚠ Albarán OK pero error en certificación: '+(certData.error||'Error desconocido')+'</div>';
+      if(data.certificacion){
+        document.getElementById('albaranStatus').innerHTML='<div class="sbox ok">✓ Albarán <strong>'+data.fileName+'</strong> guardado<br>✓ Certificación <strong>'+data.certificacion.fileName+'</strong> generada y guardada correctamente</div>';
+        showToast('✓ Albarán y Certificación guardados','ok');
+      } else {
+        document.getElementById('albaranStatus').innerHTML='<div class="sbox ok">✓ Albarán <strong>'+data.fileName+'</strong> guardado correctamente</div>';
+        if(data.certificacionError){
+          document.getElementById('albaranStatus').innerHTML+='<div class="sbox err" style="margin-top:8px">⚠ '+data.certificacionError+'</div>';
         }
-      }catch(certErr){
-        document.getElementById('albaranStatus').innerHTML+='<div class="sbox err" style="margin-top:8px">⚠ Albarán OK pero error generando certificación: '+certErr.message+'</div>';
+        showToast('✓ Albarán guardado','ok');
       }
+    } else {
+      document.getElementById('albaranStatus').innerHTML='<div class="sbox ok">✓ Albarán <strong>'+data.fileName+'</strong> generado y guardado correctamente</div>';
+      showToast('✓ Albarán guardado','ok');
     }
     btn.textContent='✓ Completado';
     setTimeout(()=>window.location.reload(),5000);
