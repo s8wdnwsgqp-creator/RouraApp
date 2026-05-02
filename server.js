@@ -472,13 +472,13 @@ app.post('/api/upload-batch', requireAuth, upload.array('files', 20), async (req
 
 // ── ALBARAN ──────────────────────────────────────────────────
 app.post('/api/albaran', requireAuth, async (req, res) => {
-  const { pedido, tipo, observaciones, clienteNombre, clienteDni, firma, timestamp, geoData } = req.body;
+  const { pedido, tipo, observaciones, clienteNombre, clienteDni, firma, timestamp, geoData, datosExcel } = req.body;
   if (!pedido) return res.status(400).json({ success: false, error: 'Falta número de pedido' });
   let pdfBuffer;
   try { pdfBuffer = await generarPDF({ pedido, tipo, observaciones, clienteNombre, clienteDni, firma, timestamp, geoData, operario: req.user.name }); }
   catch (e) { return res.status(500).json({ success: false, error: 'Error generando PDF: ' + e.message }); }
 
-  const client = new ftp.Client(60000); client.ftp.verbose = false;
+  const client = new ftp.Client(300000); client.ftp.verbose = false;
   try {
     await client.access(FTP_CONFIG);
     const albDirMap = {
@@ -491,6 +491,96 @@ app.post('/api/albaran', requireAuth, async (req, res) => {
     const tsAlb   = tsNombre(req.user.id_instalador || '');
     const pdfName = `${String(pedido).trim()} ${albInfo.label}_${tsAlb}.pdf`;
     await client.uploadFrom(Readable.from(pdfBuffer), path.posix.join(tDir, pdfName));
+
+    // ── Si es albarán final de instalación, generar Certificacion Final Trabajo ──
+    if (tipo === 'instalacion') {
+      try {
+        const dirPteCert = path.posix.join(BASE_PATH, 'Fotografias Pte Certificacion');
+        const dirCert    = path.posix.join(BASE_PATH, 'Certificacion Final Trabajo');
+        const pedidoStr  = String(pedido).trim();
+
+        // Listar archivos en la carpeta de espera y filtrar los de este pedido
+        const listPte = await ftpListSafe(client, dirPteCert);
+        const zipsDePedido = listPte.filter(f =>
+          f.type !== 2 &&
+          /\.zip$/i.test(f.name) &&
+          f.name.startsWith(pedidoStr + ' ')
+        );
+
+        // Clasificar los ZIPs según si son "Antes" o "Final"
+        const fotosAntesBufs = [];
+        const fotosFinalBufs = [];
+
+        for (const zipFile of zipsDePedido) {
+          try {
+            const zipBuf  = await ftpDownloadBuffer(client, path.posix.join(dirPteCert, zipFile.name));
+            // Extraer imágenes del ZIP en memoria con archiver (usamos unzip nativo vía tmp)
+            const tmpDir  = fs.mkdtempSync(path.join(os.tmpdir(), 'cert_'));
+            try {
+              const tmpZip = path.join(tmpDir, 'fotos.zip');
+              fs.writeFileSync(tmpZip, zipBuf);
+              execSync(`unzip -o "${tmpZip}" -d "${tmpDir}"`, { timeout: 60000 });
+              const imgFiles = fs.readdirSync(tmpDir)
+                .filter(fn => esImagen(fn))
+                .sort();
+              const esAntes = /Fotografias_Antes/i.test(zipFile.name);
+              for (const fn of imgFiles) {
+                const buf = fs.readFileSync(path.join(tmpDir, fn));
+                if (esAntes) fotosAntesBufs.push({ name: fn, buf });
+                else         fotosFinalBufs.push({ name: fn, buf });
+              }
+            } finally {
+              try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+            }
+          } catch (eZip) {
+            console.warn('[albaran] Error extrayendo ZIP', zipFile.name, eZip.message);
+          }
+        }
+
+        // Generar PDF de certificación incluyendo albarán recién generado + fotos
+        const fechaHora = timestamp || new Date().toLocaleString('es-ES');
+        const pdfCertBuf = await generarCertificacion({
+          pedido:         pedidoStr,
+          datosExcel:     datosExcel || {},
+          fechaHora,
+          operario:       req.user.name,
+          fotosAntesBufs,
+          fotosFinalBufs,
+          albaranBuf:     pdfBuffer   // el albarán que acabamos de generar
+        });
+
+        // Subir la certificación
+        await ensureDir(client, dirCert);
+        const tsCert  = tsNombre(req.user.id_instalador || '');
+        const certName = `${pedidoStr} Certificacion Final Trabajo_${tsCert}.pdf`;
+        await client.uploadFrom(Readable.from(pdfCertBuf), path.posix.join(dirCert, certName));
+
+        // Eliminar de "Fotografias Pte Certificacion" los archivos utilizados
+        for (const zipFile of zipsDePedido) {
+          try {
+            await client.remove(path.posix.join(dirPteCert, zipFile.name));
+          } catch (eDel) {
+            console.warn('[albaran] No se pudo eliminar', zipFile.name, eDel.message);
+          }
+        }
+
+        return res.json({
+          success: true,
+          fileName: pdfName,
+          ruta: `${tDir}/${pdfName}`,
+          certificacion: { fileName: certName, ruta: `${dirCert}/${certName}` }
+        });
+      } catch (eCert) {
+        // Si falla la certificación, el albarán ya está subido, devolvemos éxito con advertencia
+        console.error('[albaran] Error generando certificación automática:', eCert.message);
+        return res.json({
+          success: true,
+          fileName: pdfName,
+          ruta: `${tDir}/${pdfName}`,
+          certificacionError: 'Albarán subido correctamente, pero falló la generación automática de la certificación: ' + eCert.message
+        });
+      }
+    }
 
     res.json({ success: true, fileName: pdfName, ruta: `${tDir}/${pdfName}` });
   } catch (e) { res.status(500).json({ success: false, error: 'Error subiendo albarán: ' + e.message }); }
@@ -1975,8 +2065,13 @@ app.post('/api/upload-fotos-b64', requireAuth, async (req, res) => {
     'fotos_cfo':        { dir: 'Fotos Fin',    label: 'Fotografias_Visita CFO' },
     'fotos_cierre_cfo': { dir: 'Fotos Fin',    label: 'Fotografias_Cierre CFO' },
   };
-  const catInfo = catMap[String(categoria).trim()] || { dir: categoria, label: categoria };
+  const catStr  = String(categoria).trim();
+  const catInfo = catMap[catStr] || { dir: categoria, label: categoria };
   const tDir    = path.posix.join(BASE_PATH, catInfo.dir);
+
+  // Las fotos antes/final también se copian a la carpeta de espera de certificación
+  const esFotosCertificacion = (catStr === 'fotos_antes' || catStr === 'fotos_final');
+  const dirPteCert = path.posix.join(BASE_PATH, 'Fotografias Pte Certificacion');
 
   const entries = [];
   for (const f of fotos) {
@@ -2000,6 +2095,17 @@ app.post('/api/upload-fotos-b64', requireAuth, async (req, res) => {
     await client.access(FTP_CONFIG);
     await ensureDir(client, tDir);
     await client.uploadFrom(Readable.from(zipBuffer), path.posix.join(tDir, zipName));
+
+    // Si son fotos de antes o final, subir también a "Fotografias Pte Certificacion"
+    if (esFotosCertificacion) {
+      try {
+        await ensureDir(client, dirPteCert);
+        await client.uploadFrom(Readable.from(zipBuffer), path.posix.join(dirPteCert, zipName));
+      } catch (eCert) {
+        console.warn('[upload-fotos-b64] No se pudo copiar a Fotografias Pte Certificacion:', eCert.message);
+      }
+    }
+
     res.json({ success: true, zipFile: zipName, count: entries.length });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
