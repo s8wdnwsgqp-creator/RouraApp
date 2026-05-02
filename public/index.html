@@ -549,12 +549,18 @@ tr:hover .dld-btn{opacity:1}
     <div class="prog-wrap" id="instProgWrap" style="display:none"><div class="prog-labels"><span id="instProgTxt">Subiendo...</span><span id="instProgPct">0%</span></div><div class="prog-bg"><div class="prog-fill" id="instProgBar"></div></div></div>
     <div id="instUploadStatus"></div>
     <div id="instLotesWrap" style="display:none"><div class="lote-panel"><div class="lote-panel-header">Lotes subidos correctamente</div><div id="instLotesList"></div></div></div>
-    <div style="display:flex;flex-direction:column;gap:10px;margin-top:4px">
-      <button class="btn btn-success btn-full btn-lg" id="btnInstSubir" onclick="instSubirLote()" disabled>⬆ Subir este lote al servidor</button>
+    <!-- Grupo 1: acciones de lote -->
+    <div style="display:flex;flex-direction:column;gap:10px;margin-top:4px;padding:14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius)">
+      <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">Gestión de lote</div>
+      <button class="btn btn-success btn-full btn-lg" id="btnInstSubir" onclick="instSubirLote()" disabled>⬆ Subir lote al servidor</button>
       <button class="btn btn-full" id="btnInstOtro" onclick="instOtroLote()" style="display:none">＋ Cargar otro lote</button>
       <button class="btn btn-warning btn-full btn-lg" id="btnInstNoMasFotos" onclick="instNoMasFotos()" style="display:none">✓ No hay más fotos que cargar</button>
-      <button class="btn btn-primary btn-full btn-lg" id="btnInstFinalizar" onclick="instFinalizar()" style="display:none">✓ Instalación Finalizada. Rellenar Albarán Final Trabajos</button>
-      <button class="btn btn-full btn-lg" id="btnInstNoFinalizada" onclick="instNoFinalizada()" style="display:none;background:var(--danger);color:#000;font-weight:600">⚠ Instalación NO Finalizada. Solo subir fotografías</button>
+    </div>
+    <!-- Grupo 2: decisión de finalización (visible sólo en fase fin tras subir) -->
+    <div id="grpDecision" style="display:none;flex-direction:column;gap:12px;margin-top:6px;padding:16px;background:var(--surface);border:2px solid var(--border2);border-radius:var(--radius)">
+      <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">Siguiente paso</div>
+      <button class="btn btn-primary btn-full btn-lg" id="btnInstFinalizar" onclick="instFinalizar()" style="display:flex">✓ Instalación Finalizada · Rellenar Albarán Final Trabajos</button>
+      <button class="btn btn-full btn-lg" id="btnInstNoFinalizada" onclick="instNoFinalizada()" style="display:flex;background:linear-gradient(135deg,#b91c1c 0%,#dc2626 100%);color:#fff;font-weight:700;box-shadow:0 4px 14px rgba(185,28,28,.35);font-size:15px;padding:16px;border:none">⚠ Instalación NO Finalizada · Solo guardar fotografías</button>
     </div>
   </div>
 </div>
@@ -1431,10 +1437,9 @@ function setupFotosInstScreen(fase){
   document.getElementById('fotosInstSub').textContent='Pedido nº '+currentPedido;
   document.getElementById('fotosInstBc').innerHTML=`Instalación › ${currentPedido} › <span>${esAntes?'Fotos Antes':'Fotos Final'}</span>`;
   document.getElementById('fotosInstBack').onclick=()=>nav('instalacion');
-  document.getElementById('btnInstFinalizar').style.display='none';
   document.getElementById('btnInstNoMasFotos').style.display='none';
-  document.getElementById('btnInstNoFinalizada').style.display='none';
   document.getElementById('btnInstOtro').style.display='none';
+  document.getElementById('grpDecision').style.display='none';
   document.getElementById('instLotesWrap').style.display='none';
   document.getElementById('instUploadStatus').innerHTML='';
   document.getElementById('instProgWrap').style.display='none';
@@ -1491,8 +1496,7 @@ async function instSubirLote(){
     if(instFase==='antes'){
       document.getElementById('btnInstNoMasFotos').style.display='flex';
     } else {
-      document.getElementById('btnInstFinalizar').style.display='flex';
-      document.getElementById('btnInstNoFinalizada').style.display='flex';
+      document.getElementById('grpDecision').style.display='flex';
     }
     showToast(`✓ ${lote.n} archivos subidos`,'ok');
   }catch(e){clearInterval(iv);bar.style.width='0%';document.getElementById('instUploadStatus').innerHTML=`<div class="sbox err">⚠ Error: ${e.message}</div>`;}
@@ -1508,8 +1512,7 @@ function updateInstLotes(){
 function instOtroLote(){
   document.getElementById('btnInstOtro').style.display='none';
   document.getElementById('btnInstNoMasFotos').style.display='none';
-  document.getElementById('btnInstFinalizar').style.display='none';
-  document.getElementById('btnInstNoFinalizada').style.display='none';
+  document.getElementById('grpDecision').style.display='none';
   document.getElementById('instUploadStatus').innerHTML='';
   instFiles=[];updateInstUI();
 }
