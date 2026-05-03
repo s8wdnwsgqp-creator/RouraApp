@@ -1302,7 +1302,6 @@ function showApp(){
     // Nivel externo: solo Documentar Trabajos y CFO
     addCard('c-green',  '📤', 'Documentar Trabajos', 'Sube documentos y fotos de trabajos',                          ()=>nav('cargar'));
     addCard('c-purple', '🔍', 'CFO',                 'Visita CFO — Registro de incidencias y apertura de objeciones',()=>startFlujo('cfo'));
-    addCard('c-teal',   '📑', 'Generador de Certificaciones / Prefacturas', 'Genera certificación con fotos antes, albarán y fotos después', ()=>startFlujo('prefactura'));
   } else if(isAdmin){
     // Nivel interno + admin: acceso completo
     addCard('c-blue',   '🗂️', 'Explorador FTP',      'Navega y descarga archivos del servidor',                     ()=>nav('explorer'));
