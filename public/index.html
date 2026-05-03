@@ -1325,6 +1325,125 @@ tr:hover .dld-btn{opacity:1}
   </div>
 </div>
 
+<!-- ══════════════════════════════════════════════════════════
+     DOCUMENTACIÓN OBRA — Menú principal
+════════════════════════════════════════════════════════════ -->
+<div id="screenDocObra" class="screen">
+  <div class="sub-bar">
+    <button class="back-btn" onclick="nav('home')">← Inicio</button>
+    <span class="breadcrumb">Inicio › <span>Documentación Obra</span></span>
+  </div>
+  <div class="cards-page">
+    <div class="cards-heading">
+      <h2>📂 Documentación Obra</h2>
+      <p>Accede a la documentación técnica y de seguridad de los proyectos</p>
+    </div>
+    <div class="cards-grid">
+      <div class="card c-blue" onclick="nav('docObraPIC')">
+        <div class="card-ico">📐</div>
+        <div class="card-name">PIC / Planos</div>
+        <div class="card-desc">Descarga el PIC del proyecto introduciendo el número de proyecto</div>
+        <div class="card-arrow">→</div>
+      </div>
+      <div class="card c-orange" onclick="nav('docObraSeguridad')">
+        <div class="card-ico">🦺</div>
+        <div class="card-name">Documentación de Seguridad</div>
+        <div class="card-desc">Plan de Medidas Preventivas según cliente</div>
+        <div class="card-arrow">→</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     DOCUMENTACIÓN OBRA — PIC / Planos
+════════════════════════════════════════════════════════════ -->
+<div id="screenDocObraPIC" class="screen">
+  <div class="sub-bar">
+    <button class="back-btn" onclick="nav('docObra')">← Atrás</button>
+    <span class="breadcrumb">Inicio › Documentación Obra › <span>PIC / Planos</span></span>
+  </div>
+  <div class="ped-wrap">
+    <div class="ped-icon">📐</div>
+    <div class="ped-title">PIC / Planos del Proyecto</div>
+    <div class="ped-sub">Introduce el número de proyecto para descargar el PIC correspondiente</div>
+    <div class="form-group" style="width:100%">
+      <div class="form-label">Número de Proyecto</div>
+      <input type="text" id="inputPIC" class="form-input" placeholder="Ej: 2025001" autocomplete="off"
+             onkeydown="if(event.key==='Enter')descargarPIC()"/>
+    </div>
+    <button class="btn btn-primary btn-lg btn-full" onclick="descargarPIC()">⬇ Descargar PIC</button>
+    <div id="picStatus"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     DOCUMENTACIÓN OBRA — Documentación de Seguridad
+════════════════════════════════════════════════════════════ -->
+<div id="screenDocObraSeguridad" class="screen">
+  <div class="sub-bar">
+    <button class="back-btn" onclick="nav('docObra')">← Atrás</button>
+    <span class="breadcrumb">Inicio › Documentación Obra › <span>Documentación de Seguridad</span></span>
+  </div>
+  <div class="cards-page">
+    <div class="cards-heading">
+      <h2>🦺 Documentación de Seguridad</h2>
+      <p>Selecciona el tipo de plan de medidas preventivas</p>
+    </div>
+    <div class="cards-grid">
+      <div class="card c-blue" onclick="nav('docObraPlanMedidas')">
+        <div class="card-ico">📋</div>
+        <div class="card-name">Plan Medidas Preventivas Genérico</div>
+        <div class="card-desc">Descarga el Plan de Medidas Preventivas según el cliente</div>
+        <div class="card-arrow">→</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     DOCUMENTACIÓN OBRA — Plan Medidas Preventivas (selector)
+════════════════════════════════════════════════════════════ -->
+<div id="screenDocObraPlanMedidas" class="screen">
+  <div class="sub-bar">
+    <button class="back-btn" onclick="nav('docObraSeguridad')">← Atrás</button>
+    <span class="breadcrumb">Inicio › Doc. Obra › Seguridad › <span>Plan Medidas Preventivas</span></span>
+  </div>
+  <div class="cards-page">
+    <div class="cards-heading">
+      <h2>📋 Plan Medidas Preventivas Genérico</h2>
+      <p>Selecciona el cliente para descargar el plan correspondiente</p>
+    </div>
+    <div class="cards-grid">
+      <div class="card c-blue" onclick="descargarPlanMedidas('REPSOL_MTO')">
+        <div class="card-ico">🔴</div>
+        <div class="card-name">REPSOL MTO</div>
+        <div class="card-desc">Plan de Medidas Preventivas para trabajos de Mantenimiento Repsol</div>
+        <div class="card-arrow">⬇</div>
+      </div>
+      <div class="card c-orange" onclick="descargarPlanMedidas('REPSOL_CAMPANA')">
+        <div class="card-ico">🔴</div>
+        <div class="card-name">REPSOL CAMPAÑA CAMBIO IMAGEN</div>
+        <div class="card-desc">Plan de Medidas Preventivas para campaña de cambio de imagen Repsol</div>
+        <div class="card-arrow">⬇</div>
+      </div>
+      <div class="card c-green" onclick="descargarPlanMedidas('MAPFRE')">
+        <div class="card-ico">🟦</div>
+        <div class="card-name">MAPFRE</div>
+        <div class="card-desc">Plan de Medidas Preventivas para trabajos en instalaciones Mapfre</div>
+        <div class="card-arrow">⬇</div>
+      </div>
+      <div class="card c-slate" onclick="descargarPlanMedidas('OTROS')">
+        <div class="card-ico">🏢</div>
+        <div class="card-name">OTROS CLIENTES</div>
+        <div class="card-desc">Plan de Medidas Preventivas genérico para otros clientes</div>
+        <div class="card-arrow">⬇</div>
+      </div>
+    </div>
+    <div id="planMedidasStatus" style="max-width:460px;width:100%;margin-top:8px"></div>
+  </div>
+</div>
+
 <script>
 // ── LOGO INJECTION ──────────────────────────────────────────
 (function injectLogos(){
@@ -1428,9 +1547,10 @@ function showApp(){
   }
 
   if(esExterno){
-    // Nivel externo: solo Documentar Trabajos y CFO
+    // Nivel externo: solo Documentar Trabajos, CFO y Documentación Obra
     addCard('c-green',  '📤', 'Documentar Trabajos', 'Sube documentos y fotos de trabajos',                          ()=>nav('cargar'));
     addCard('c-purple', '🔍', 'CFO',                 'Visita CFO — Registro de incidencias y apertura de objeciones',()=>startFlujo('cfo'));
+    addCard('c-teal',   '📂', 'Documentación Obra',  'PIC / Planos y Documentación de Seguridad del proyecto',       ()=>nav('docObra'));
   } else if(isAdmin){
     // Nivel interno + admin: acceso completo
     addCard('c-blue',   '🗂️', 'Explorador FTP',      'Navega y descarga archivos del servidor',                     ()=>nav('explorer'));
@@ -1442,6 +1562,7 @@ function showApp(){
     addCard('c-orange', '🚛', 'Expediciones',          'Registrar y fotografiar expediciones de pedidos',             ()=>startFlujo('expediciones'));
     addCard('c-teal',   '📑', 'Generador de Certificaciones / Prefacturas', 'Genera certificación con fotos antes, albarán y fotos después', ()=>startFlujo('prefactura'));
     addCard('c-slate',  '⚙️', 'Configuración Documentación Proyectos', 'Activa la Proforma Cuantitativa por SIE',   ()=>nav('configProforma'));
+    addCard('c-teal',   '📂', 'Documentación Obra',  'PIC / Planos y Documentación de Seguridad del proyecto',       ()=>nav('docObra'));
   } else {
     // Nivel interno + usuario: todo menos Explorador FTP y Gestión de Usuarios
     addCard('c-green',  '📤', 'Documentar Trabajos', 'Sube documentos y fotos de trabajos',                         ()=>nav('cargar'));
@@ -1451,6 +1572,7 @@ function showApp(){
     addCard('c-orange', '🚛', 'Expediciones',          'Registrar y fotografiar expediciones de pedidos',             ()=>startFlujo('expediciones'));
     addCard('c-teal',   '📑', 'Generador de Certificaciones / Prefacturas', 'Genera certificación con fotos antes, albarán y fotos después', ()=>startFlujo('prefactura'));
     addCard('c-slate',  '⚙️', 'Configuración Documentación Proyectos', 'Activa la Proforma Cuantitativa por SIE',   ()=>nav('configProforma'));
+    addCard('c-teal',   '📂', 'Documentación Obra',  'PIC / Planos y Documentación de Seguridad del proyecto',       ()=>nav('docObra'));
   }
 
   initGeo();startPing();nav('home');
@@ -1459,6 +1581,57 @@ async function doLogout(){
   stopMapRefresh();if(pingTimer)clearInterval(pingTimer);
   try{await authFetch('/api/auth/logout',{method:'POST'});}catch(_){}
   token=null;currentUser=null;sessionStorage.clear();window.location.reload();
+}
+
+// ── DOCUMENTACIÓN OBRA ───────────────────────────────────────
+async function descargarPIC(){
+  const v=document.getElementById('inputPIC').value.trim();
+  if(!v){showToast('Introduce el número de proyecto','err');return;}
+  const statusEl=document.getElementById('picStatus');
+  statusEl.innerHTML='<div class="sbox info" style="margin-top:12px">⏳ Buscando PIC en el servidor...</div>';
+  try{
+    const res=await authFetch('/api/doc-obra/pic?pedido='+encodeURIComponent(v));
+    if(!res.ok){
+      const err=await res.json().catch(()=>({error:'Error desconocido'}));
+      statusEl.innerHTML=`<div class="sbox err" style="margin-top:12px">⚠ ${err.error||'No se pudo descargar el PIC'}</div>`;
+      return;
+    }
+    // Forzar descarga en el dispositivo
+    const blob=await res.blob();
+    const cd=res.headers.get('Content-Disposition')||'';
+    const match=cd.match(/filename="?([^"]+)"?/);
+    const fileName=match?decodeURIComponent(match[1]):'PIC_'+v+'.pdf';
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download=fileName;a.click();
+    setTimeout(()=>URL.revokeObjectURL(url),5000);
+    statusEl.innerHTML=`<div class="sbox ok" style="margin-top:12px">✓ PIC descargado: <b>${fileName}</b></div>`;
+  }catch(e){
+    statusEl.innerHTML=`<div class="sbox err" style="margin-top:12px">⚠ Error: ${e.message}</div>`;
+  }
+}
+async function descargarPlanMedidas(tipo){
+  const etiquetas={REPSOL_MTO:'REPSOL MTO',REPSOL_CAMPANA:'REPSOL CAMPAÑA CAMBIO IMAGEN',MAPFRE:'MAPFRE',OTROS:'OTROS CLIENTES'};
+  const statusEl=document.getElementById('planMedidasStatus');
+  statusEl.innerHTML=`<div class="sbox info">⏳ Descargando Plan Medidas Preventivas — ${etiquetas[tipo]||tipo}...</div>`;
+  try{
+    const res=await authFetch('/api/doc-obra/plan-medidas?tipo='+encodeURIComponent(tipo));
+    if(!res.ok){
+      const err=await res.json().catch(()=>({error:'Error desconocido'}));
+      statusEl.innerHTML=`<div class="sbox err">⚠ ${err.error||'No se pudo descargar el plan'}</div>`;
+      return;
+    }
+    const blob=await res.blob();
+    const cd=res.headers.get('Content-Disposition')||'';
+    const match=cd.match(/filename="?([^"]+)"?/);
+    const fileName=match?decodeURIComponent(match[1]):'PlanMedidas_'+tipo+'.pdf';
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download=fileName;a.click();
+    setTimeout(()=>URL.revokeObjectURL(url),5000);
+    statusEl.innerHTML=`<div class="sbox ok">✓ Descargado: <b>${fileName}</b></div>`;
+    showToast('✓ Plan descargado correctamente','ok');
+  }catch(e){
+    statusEl.innerHTML=`<div class="sbox err">⚠ Error: ${e.message}</div>`;
+  }
 }
 // ── PERMISOS ─────────────────────────────────────────────────
 const PERM_KEY = 'rc_perms_granted';
@@ -1593,7 +1766,7 @@ function _onVisibilityGeo(){
 // ── NAV ──────────────────────────────────────────────────────
 function nav(s,p){
   document.querySelectorAll('.screen').forEach(el=>el.classList.remove('active'));
-  const map={home:'screenHome',explorer:'screenExplorer',cargar:'screenCargar',pedido:'screenPedido',confirmPedido:'screenConfirmPedido',medicion:'screenMedicion',instalacion:'screenInstalacion',fotos:'screenFotos',fotosInst:'screenFotosInst',albaran:'screenAlbaran',usuarios:'screenUsuarios',mapa:'screenMapa',cfo:'screenCFO',cfoInc:'screenCFOInc',cierreCFO:'screenCierreCFO',informeVisitas:'screenInformeVisitas',expediciones:'screenExpediciones',expedFotos:'screenExpedFotos',fotosInspSeguridad:'screenFotosInspSeguridad',prefactura:'screenPrefactura',prefFotos:'screenPrefFotos',proforma:'screenProforma',configProforma:'screenConfigProforma'};
+  const map={home:'screenHome',explorer:'screenExplorer',cargar:'screenCargar',pedido:'screenPedido',confirmPedido:'screenConfirmPedido',medicion:'screenMedicion',instalacion:'screenInstalacion',fotos:'screenFotos',fotosInst:'screenFotosInst',albaran:'screenAlbaran',usuarios:'screenUsuarios',mapa:'screenMapa',cfo:'screenCFO',cfoInc:'screenCFOInc',cierreCFO:'screenCierreCFO',informeVisitas:'screenInformeVisitas',expediciones:'screenExpediciones',expedFotos:'screenExpedFotos',fotosInspSeguridad:'screenFotosInspSeguridad',prefactura:'screenPrefactura',prefFotos:'screenPrefFotos',proforma:'screenProforma',configProforma:'screenConfigProforma',docObra:'screenDocObra',docObraPIC:'screenDocObraPIC',docObraSeguridad:'screenDocObraSeguridad',docObraPlanMedidas:'screenDocObraPlanMedidas'};
   const el=document.getElementById(map[s]);if(el)el.classList.add('active');
   if(s==='explorer'&&expItems.length===0)expLoad('/');
   if(s==='fotos')setupFotosScreen(p);
