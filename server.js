@@ -114,9 +114,9 @@ function getUsers() {
 // ── CONFIG (proforma SIEs, etc.) ─────────────────────────────
 function getConfig() {
   try {
-    if (!fs.existsSync(CONFIG_FILE)) return { proformaSIEs: [] };
+    if (!fs.existsSync(CONFIG_FILE)) return { proformaSIEs: [], proformaTipos: {} };
     return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-  } catch (_) { return { proformaSIEs: [] }; }
+  } catch (_) { return { proformaSIEs: [], proformaTipos: {} }; }
 }
 function saveConfig(cfg) {
   fs.mkdirSync(path.dirname(CONFIG_FILE), { recursive: true });
@@ -2502,10 +2502,16 @@ app.get('/api/doc-proforma/proyecto', requireAuth, async (req, res) => {
 });
 
 // ── PROFORMA CUANTITATIVA MAPFRE ────────────────────────────────────────────
-// GET /api/proforma-mapfre?pedido=XXXX
-// Busca el fichero "Proforma Mapfre*" en /www/Proforma y devuelve las filas
-// col A (label fijo) + col B (valor editable) con el tipo de celda original.
+// GET /api/proforma-mapfre?pedido=XXXX&sie=NOMBRE_SIE&tipo=generico|proyecto
+// Busca el fichero de Proforma en /www/Proforma según el tipo configurado para el SIE:
+//   - tipo=generico (o no especificado): busca "Proforma <SIE>*"
+//   - tipo=proyecto: busca un archivo cuyo nombre empiece por el número de pedido
+// Devuelve filas col A (label fijo) + col B (valor editable) con el tipo de celda original.
 app.get('/api/proforma-mapfre', requireAuth, async (req, res) => {
+  const pedido = (req.query.pedido || '').trim();
+  const sie    = (req.query.sie    || '').trim();
+  const tipo   = (req.query.tipo   || 'generico').trim().toLowerCase();
+
   const DIR_PROFORMA = path.posix.join(BASE_PATH, 'Proforma');
   const client = new ftp.Client(120000);
   client.ftp.verbose = false;
@@ -2513,11 +2519,32 @@ app.get('/api/proforma-mapfre', requireAuth, async (req, res) => {
     await client.access(FTP_CONFIG);
     await ensureDir(client, DIR_PROFORMA);
 
-    // Buscar fichero cuyo nombre contenga "Proforma Mapfre" (insensible)
     const list = await ftpListSafe(client, DIR_PROFORMA);
-    const entry = list.find(f => /proforma\s*mapfre/i.test(f.name) && /\.xlsx?$/i.test(f.name));
-    if (!entry) {
-      return res.status(404).json({ success: false, error: 'No se encontró el fichero "Proforma Mapfre" en la carpeta Proforma del FTP.' });
+    let entry;
+
+    if (tipo === 'proyecto') {
+      // Buscar archivo que empiece por el número de pedido
+      if (!pedido) return res.status(400).json({ success: false, error: 'Falta el número de pedido para Proforma Proyecto' });
+      entry = list.find(f => f.name.toLowerCase().startsWith(pedido.toLowerCase()) && /\.xlsx?$/i.test(f.name) && f.type !== 2);
+      if (!entry) {
+        return res.status(404).json({ success: false, error: `No se encontró ningún archivo de Proforma que empiece por "${pedido}" en la carpeta Proforma del FTP.` });
+      }
+    } else {
+      // tipo=generico: busca "Proforma <SIE>*"  (o el clásico "Proforma Mapfre*" si no hay SIE)
+      if (sie) {
+        const escaped = sie.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const pattern = new RegExp('^proforma\\s+' + escaped, 'i');
+        entry = list.find(f => pattern.test(f.name) && /\.xlsx?$/i.test(f.name) && f.type !== 2);
+        if (!entry) {
+          return res.status(404).json({ success: false, error: `No se encontró el archivo "Proforma ${sie}" en la carpeta Proforma del FTP.` });
+        }
+      } else {
+        // Fallback clásico: "Proforma Mapfre*"
+        entry = list.find(f => /proforma\s*mapfre/i.test(f.name) && /\.xlsx?$/i.test(f.name));
+        if (!entry) {
+          return res.status(404).json({ success: false, error: 'No se encontró el fichero "Proforma Mapfre" en la carpeta Proforma del FTP.' });
+        }
+      }
     }
 
     // Descargar
@@ -2632,28 +2659,36 @@ app.post('/api/guardar-proforma', requireAuth, async (req, res) => {
 
 // ── CONFIGURACIÓN DOCUMENTACIÓN PROYECTOS ───────────────────────────────────
 
-// GET /api/config/proforma — devuelve la lista de SIEs con Proforma activada
+// GET /api/config/proforma — devuelve la lista de SIEs con Proforma activada y sus tipos
 // Accesible a usuarios internos (no externos)
 app.get('/api/config/proforma', requireAuth, (req, res) => {
   const cfg = getConfig();
-  res.json({ success: true, proformaSIEs: cfg.proformaSIEs || [] });
+  res.json({ success: true, proformaSIEs: cfg.proformaSIEs || [], proformaTipos: cfg.proformaTipos || {} });
 });
 
-// POST /api/config/proforma — guarda la lista de SIEs con Proforma activada
+// POST /api/config/proforma — guarda la lista de SIEs con Proforma activada y sus tipos
 // Solo internos (admin o user interno); externos no tienen acceso a esta pantalla
 app.post('/api/config/proforma', requireAuth, (req, res) => {
   const nivelAcceso = (req.user.nivel_acceso || '').toLowerCase().trim();
   if (nivelAcceso === 'externo') {
     return res.status(403).json({ success: false, error: 'Sin permisos' });
   }
-  const { proformaSIEs } = req.body;
+  const { proformaSIEs, proformaTipos } = req.body;
   if (!Array.isArray(proformaSIEs)) {
     return res.status(400).json({ success: false, error: 'proformaSIEs debe ser un array' });
   }
   const cfg = getConfig();
-  cfg.proformaSIEs = proformaSIEs.map(s => String(s).trim()).filter(Boolean);
+  cfg.proformaSIEs  = proformaSIEs.map(s => String(s).trim()).filter(Boolean);
+  // proformaTipos: objeto { [sie]: 'generico'|'proyecto' }
+  if (proformaTipos && typeof proformaTipos === 'object' && !Array.isArray(proformaTipos)) {
+    cfg.proformaTipos = {};
+    for (const [sie, tipo] of Object.entries(proformaTipos)) {
+      const t = String(tipo).trim();
+      if (t === 'generico' || t === 'proyecto') cfg.proformaTipos[String(sie).trim()] = t;
+    }
+  }
   saveConfig(cfg);
-  res.json({ success: true, proformaSIEs: cfg.proformaSIEs });
+  res.json({ success: true, proformaSIEs: cfg.proformaSIEs, proformaTipos: cfg.proformaTipos });
 });
 
 // GET /api/sies-disponibles — lista SIEs únicos del Excel vw_segplazo (no vacíos)
