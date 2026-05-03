@@ -126,6 +126,10 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:1
 .card.c-purple::after{background:linear-gradient(90deg,var(--purple),#9f7aea);opacity:1}
 .card.c-purple:hover{border-color:var(--purple);box-shadow:var(--shadow-lg),0 0 0 1px rgba(107,70,193,.15)}
 
+.card.c-teal{border-color:rgba(13,148,136,.2);background:linear-gradient(160deg,#fff 60%,rgba(13,148,136,.05))}
+.card.c-teal::after{background:linear-gradient(90deg,#0d9488,#2dd4bf);opacity:1}
+.card.c-teal:hover{border-color:#0d9488;box-shadow:var(--shadow-lg),0 0 0 1px rgba(13,148,136,.15)}
+
 /* 3D EMOJI ICONS */
 .card-ico{width:60px;height:60px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:28px;position:relative}
 .card-ico::before{content:'';position:absolute;inset:0;border-radius:14px;opacity:.5}
@@ -134,6 +138,8 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:1
 .c-orange .card-ico{background:linear-gradient(145deg,#ffedd5,#fed7aa);box-shadow:0 4px 10px rgba(221,107,32,.2),inset 0 1px 1px rgba(255,255,255,.8)}
 .c-gold .card-ico{background:linear-gradient(145deg,#fef3c7,#fde68a);box-shadow:0 4px 10px rgba(245,158,11,.2),inset 0 1px 1px rgba(255,255,255,.8)}
 .c-purple .card-ico{background:linear-gradient(145deg,#ede9fe,#ddd6fe);box-shadow:0 4px 10px rgba(107,70,193,.2),inset 0 1px 1px rgba(255,255,255,.8)}
+.c-teal .card-ico{background:linear-gradient(145deg,#ccfbf1,#99f6e4);box-shadow:0 4px 10px rgba(13,148,136,.2),inset 0 1px 1px rgba(255,255,255,.8)}
+.c-teal .card-arrow{color:#0d9488}
 
 .card-name{font-size:13px;font-weight:700;color:var(--text);letter-spacing:-.01em}
 .card-desc{font-size:11px;color:var(--text-muted);line-height:1.55;font-weight:400}
@@ -1062,7 +1068,7 @@ tr:hover .dld-btn{opacity:1}
   </div>
 </div>
 
-<!-- FOTOGRAFIAS INSPECCION SEGURIDAD -->
+<!-- FOTOGRAFÍAS INSPECCION SEGURIDAD -->
 <div id="screenFotosInspSeguridad" class="screen">
   <div class="sub-bar">
     <button class="back-btn" onclick="nav('informeVisitas')">← Atrás</button>
@@ -1107,6 +1113,93 @@ tr:hover .dld-btn{opacity:1}
       <button class="btn btn-success btn-full btn-lg" id="btnInspSegSubir" onclick="inspSegSubirLote()" disabled>⬆ Subir este lote al servidor</button>
       <button class="btn btn-full" id="btnInspSegOtro" onclick="inspSegOtroLote()" style="display:none">＋ Cargar otro lote</button>
       <button class="btn btn-primary btn-full btn-lg" id="btnInspSegFinalizar" onclick="nav('home')" style="display:none">✓ Finalizar y volver al inicio</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- GENERADOR DE CERTIFICACIONES / PREFACTURAS                 -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+
+<!-- PREFACTURA MENU — tras validar el pedido -->
+<div id="screenPrefactura" class="screen">
+  <div class="sub-bar">
+    <button class="back-btn" onclick="nav('pedido')">← Atrás</button>
+    <span class="breadcrumb">Certificación › <span id="lbPrefPed"></span></span>
+  </div>
+  <div class="cards-page">
+    <div class="cards-heading">
+      <h2>📑 Generador de Certificaciones / Prefacturas</h2>
+      <p id="subPref">Pedido nº —</p>
+    </div>
+    <div class="cards-grid">
+      <div class="card c-blue" onclick="prefNav('antes')">
+        <div class="card-ico">📸</div>
+        <div class="card-name">1 — Fotos Antes</div>
+        <div class="card-desc">Estado previo al trabajo. <span id="prefAntesStatus" style="color:var(--text-muted)">Pendiente</span></div>
+        <div class="card-arrow" id="prefAntesArrow">→</div>
+      </div>
+      <div class="card c-orange" onclick="prefNav('albaran')">
+        <div class="card-ico">📋</div>
+        <div class="card-name">2 — Albarán</div>
+        <div class="card-desc">Foto/documento del albarán de trabajos. <span id="prefAlbaranStatus" style="color:var(--text-muted)">Pendiente</span></div>
+        <div class="card-arrow" id="prefAlbaranArrow">→</div>
+      </div>
+      <div class="card c-green" onclick="prefNav('despues')">
+        <div class="card-ico">✅</div>
+        <div class="card-name">3 — Fotos Después</div>
+        <div class="card-desc">Estado tras la finalización. <span id="prefDespuesStatus" style="color:var(--text-muted)">Pendiente</span></div>
+        <div class="card-arrow" id="prefDespuesArrow">→</div>
+      </div>
+    </div>
+    <div style="max-width:460px;width:100%;margin-top:8px;display:flex;flex-direction:column;gap:10px">
+      <div id="prefResumenBox" style="display:none;background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:14px;font-size:12px;color:var(--text-dim)">
+        <div style="font-weight:700;color:var(--text);margin-bottom:8px">Resumen de archivos cargados:</div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap">
+          <span>📸 Antes: <b id="prefResAntes">0</b></span>
+          <span>📋 Albarán: <b id="prefResAlbaran">0</b></span>
+          <span>✅ Después: <b id="prefResDespues">0</b></span>
+        </div>
+      </div>
+      <button class="btn btn-primary btn-full btn-lg" id="btnGenerarPrefactura" onclick="generarPrefactura()" style="background:linear-gradient(135deg,#0d9488,#0f766e);border-color:#0d9488;box-shadow:0 2px 8px rgba(13,148,136,.3)">📑 Generar Certificación / Prefactura</button>
+      <div id="prefStatus"></div>
+    </div>
+  </div>
+</div>
+
+<!-- PREFACTURA FOTOS — pantalla de carga de fotos por sección -->
+<div id="screenPrefFotos" class="screen">
+  <div class="sub-bar">
+    <button class="back-btn" id="prefFotosBack">← Atrás</button>
+    <span class="breadcrumb" id="prefFotosBc"></span>
+  </div>
+  <div class="page-wrap">
+    <div class="sec-row">
+      <div>
+        <div class="sec-title" id="prefFotosTitle"></div>
+        <div class="sec-sub" id="prefFotosSub"></div>
+      </div>
+      <div class="counter" id="prefFotosCounter">0 / 20</div>
+    </div>
+    <label class="cam-btn">📷 Abrir Cámara del Dispositivo
+      <input type="file" accept="image/*" capture="environment" multiple id="inputCamaraPref" style="display:none"/>
+    </label>
+    <div class="upload-zone" id="uploadZonePref">
+      <input type="file" id="inputGaleriaPref" multiple accept="image/*,application/pdf,.doc,.docx"/>
+      <div class="upload-zone-ico" id="prefUploadIco">📁</div>
+      <div class="upload-zone-title">Arrastra archivos aquí o pulsa para seleccionar</div>
+      <div class="upload-zone-sub" id="prefUploadSub">Máximo 20 archivos por lote · Imágenes y documentos</div>
+    </div>
+    <div id="fileListPrefWrap" style="display:none">
+      <div class="sec-row" style="margin-bottom:8px">
+        <div class="sec-title">Archivos seleccionados</div>
+        <button class="btn" onclick="clearPrefFiles()" style="font-size:11px;padding:5px 10px">✕ Limpiar</button>
+      </div>
+      <div class="file-list" id="fileListPrefEl"></div>
+    </div>
+    <div class="sbox info" id="prefFotosInfoBox" style="display:none"></div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-top:4px">
+      <button class="btn btn-success btn-full btn-lg" id="btnPrefConfirmar" onclick="prefConfirmarSeccion()" disabled>✓ Confirmar y Volver al Menú</button>
     </div>
   </div>
 </div>
@@ -1209,6 +1302,7 @@ function showApp(){
     // Nivel externo: solo Documentar Trabajos y CFO
     addCard('c-green',  '📤', 'Documentar Trabajos', 'Sube documentos y fotos de trabajos',                          ()=>nav('cargar'));
     addCard('c-purple', '🔍', 'CFO',                 'Visita CFO — Registro de incidencias y apertura de objeciones',()=>startFlujo('cfo'));
+    addCard('c-teal',   '📑', 'Generador de Certificaciones / Prefacturas', 'Genera certificación con fotos antes, albarán y fotos después', ()=>startFlujo('prefactura'));
   } else if(isAdmin){
     // Nivel interno + admin: acceso completo
     addCard('c-blue',   '🗂️', 'Explorador FTP',      'Navega y descarga archivos del servidor',                     ()=>nav('explorer'));
@@ -1218,6 +1312,7 @@ function showApp(){
     addCard('c-blue',   '🗺️', 'Mapa en Tiempo Real',  'Ubicación de usuarios conectados',                            ()=>nav('mapa'));
     addCard('c-gold',   '👥', 'Gestión de Usuarios',  'Crear y eliminar usuarios del sistema',                       ()=>nav('usuarios'));
     addCard('c-orange', '🚛', 'Expediciones',          'Registrar y fotografiar expediciones de pedidos',             ()=>startFlujo('expediciones'));
+    addCard('c-teal',   '📑', 'Generador de Certificaciones / Prefacturas', 'Genera certificación con fotos antes, albarán y fotos después', ()=>startFlujo('prefactura'));
   } else {
     // Nivel interno + usuario: todo menos Explorador FTP y Gestión de Usuarios
     addCard('c-green',  '📤', 'Documentar Trabajos', 'Sube documentos y fotos de trabajos',                         ()=>nav('cargar'));
@@ -1225,6 +1320,7 @@ function showApp(){
     addCard('c-orange', '📋', 'Informe Visitas',       'Visitas de Liderazgo e Inspecciones de Seguridad',            ()=>nav('informeVisitas'));
     addCard('c-blue',   '🗺️', 'Mapa en Tiempo Real',  'Ubicación de usuarios conectados',                            ()=>nav('mapa'));
     addCard('c-orange', '🚛', 'Expediciones',          'Registrar y fotografiar expediciones de pedidos',             ()=>startFlujo('expediciones'));
+    addCard('c-teal',   '📑', 'Generador de Certificaciones / Prefacturas', 'Genera certificación con fotos antes, albarán y fotos después', ()=>startFlujo('prefactura'));
   }
 
   initGeo();startPing();nav('home');
@@ -1367,7 +1463,7 @@ function _onVisibilityGeo(){
 // ── NAV ──────────────────────────────────────────────────────
 function nav(s,p){
   document.querySelectorAll('.screen').forEach(el=>el.classList.remove('active'));
-  const map={home:'screenHome',explorer:'screenExplorer',cargar:'screenCargar',pedido:'screenPedido',confirmPedido:'screenConfirmPedido',medicion:'screenMedicion',instalacion:'screenInstalacion',fotos:'screenFotos',fotosInst:'screenFotosInst',albaran:'screenAlbaran',usuarios:'screenUsuarios',mapa:'screenMapa',cfo:'screenCFO',cfoInc:'screenCFOInc',cierreCFO:'screenCierreCFO',informeVisitas:'screenInformeVisitas',expediciones:'screenExpediciones',expedFotos:'screenExpedFotos',fotosInspSeguridad:'screenFotosInspSeguridad'};
+  const map={home:'screenHome',explorer:'screenExplorer',cargar:'screenCargar',pedido:'screenPedido',confirmPedido:'screenConfirmPedido',medicion:'screenMedicion',instalacion:'screenInstalacion',fotos:'screenFotos',fotosInst:'screenFotosInst',albaran:'screenAlbaran',usuarios:'screenUsuarios',mapa:'screenMapa',cfo:'screenCFO',cfoInc:'screenCFOInc',cierreCFO:'screenCierreCFO',informeVisitas:'screenInformeVisitas',expediciones:'screenExpediciones',expedFotos:'screenExpedFotos',fotosInspSeguridad:'screenFotosInspSeguridad',prefactura:'screenPrefactura',prefFotos:'screenPrefFotos'};
   const el=document.getElementById(map[s]);if(el)el.classList.add('active');
   if(s==='explorer'&&expItems.length===0)expLoad('/');
   if(s==='fotos')setupFotosScreen(p);
@@ -1380,6 +1476,8 @@ function nav(s,p){
   if(s==='expediciones')setupExpedicionesScreen();
   if(s==='expedFotos')setupExpedFotosScreen();
   if(s==='fotosInspSeguridad')setupFotosInspSeguridadScreen();
+  if(s==='prefactura')setupPrefacturaScreen();
+  if(s==='prefFotos')setupPrefFotosScreen(_prefSeccionActual);
   if(s==='usuarios')loadUsers();
   if(s==='mapa'){initMap();startMapRefresh();}
   if(s!=='mapa')stopMapRefresh();
@@ -1389,6 +1487,7 @@ function startFlujo(t){
   expedFiles=[];expedLotes=[];
   if(t==='inspeccionSeguridad') nav('pedido');
   else if(t==='expediciones') nav('pedido');
+  else if(t==='prefactura'){prefReset();nav('pedido');}
   else nav('pedido');
 }
 
@@ -1398,10 +1497,11 @@ function setupPedidoScreen(){
   const isCFO=currentFlujo==='cfo';
   const isExp=currentFlujo==='expediciones';
   const isInspSeg=currentFlujo==='inspeccionSeguridad';
-  document.getElementById('pedidoIcon').textContent=isCFO?'🔍':isIns?'🔧':isExp?'🚛':isInspSeg?'📸':'📐';
-  document.getElementById('pedidoTitle').textContent=isCFO?'Visita CFO':isIns?'Documentar Trabajo de Instalación':isExp?'Expedición — Número de Pedido':isInspSeg?'Fotografías Inspección de Seguridad':'Toma de Datos / Medición';
-  document.getElementById('pedidoBc').innerHTML=isCFO?`Inicio › CFO › <span>Número de Pedido</span>`:isExp?`Inicio › Expediciones › <span>Número de Pedido</span>`:isInspSeg?`Inicio › Informe Visitas › <span>Número de Pedido</span>`:`Inicio › Documentar Trabajos › <span>${isIns?'Instalación':'Medición'}</span>`;
-  document.getElementById('pedidoBack').onclick=()=>nav(isCFO?'home':isExp?'home':isInspSeg?'informeVisitas':'cargar');
+  const isPref=currentFlujo==='prefactura';
+  document.getElementById('pedidoIcon').textContent=isCFO?'🔍':isIns?'🔧':isExp?'🚛':isInspSeg?'📸':isPref?'📑':'📐';
+  document.getElementById('pedidoTitle').textContent=isCFO?'Visita CFO':isIns?'Documentar Trabajo de Instalación':isExp?'Expedición — Número de Pedido':isInspSeg?'Fotografías Inspección de Seguridad':isPref?'Generador de Certificaciones / Prefacturas':'Toma de Datos / Medición';
+  document.getElementById('pedidoBc').innerHTML=isCFO?`Inicio › CFO › <span>Número de Pedido</span>`:isExp?`Inicio › Expediciones › <span>Número de Pedido</span>`:isInspSeg?`Inicio › Informe Visitas › <span>Número de Pedido</span>`:isPref?`Inicio › Certificaciones › <span>Número de Pedido</span>`:`Inicio › Documentar Trabajos › <span>${isIns?'Instalación':'Medición'}</span>`;
+  document.getElementById('pedidoBack').onclick=()=>nav(isCFO?'home':isExp?'home':isInspSeg?'informeVisitas':isPref?'home':'cargar');
   document.getElementById('inputPedido').value=currentPedido||'';
   setTimeout(()=>document.getElementById('inputPedido').focus(),200);
 }
@@ -1447,6 +1547,7 @@ function confirmPedidoAceptar(){
   else if(currentFlujo==='medicion') nav('medicion');
   else if(currentFlujo==='expediciones') nav('expediciones');
   else if(currentFlujo==='inspeccionSeguridad') nav('fotosInspSeguridad');
+  else if(currentFlujo==='prefactura') nav('prefactura');
   else nav('instalacion');
 }
 function confirmPedidoCancelar(){currentPedido='';nav('home');}
@@ -2947,6 +3048,240 @@ async function crearUsuario() {
     errEl.textContent=e.message; errEl.style.display='';
   } finally { btn.disabled=false; btn.textContent='Crear usuario'; }
 }
+
+// ══════════════════════════════════════════════════════════
+// ── GENERADOR DE CERTIFICACIONES / PREFACTURAS JS ─────────
+// ══════════════════════════════════════════════════════════
+
+let prefFilesAntes   = [];   // { name, file } objetos File
+let prefFilesAlbaran = [];   // { name, file }
+let prefFilesDespues = [];   // { name, file }
+let _prefSeccionActual = ''; // 'antes' | 'albaran' | 'despues'
+let prefFilesCurrent = [];   // referencia temporal a la sección activa
+
+function prefReset(){
+  prefFilesAntes   = [];
+  prefFilesAlbaran = [];
+  prefFilesDespues = [];
+  _prefSeccionActual = '';
+}
+
+function setupPrefacturaScreen(){
+  document.getElementById('lbPrefPed').textContent = currentPedido;
+  document.getElementById('subPref').textContent   = 'Pedido nº ' + currentPedido;
+  prefUpdateMenuCards();
+  document.getElementById('prefStatus').innerHTML  = '';
+  document.getElementById('btnGenerarPrefactura').disabled = false;
+  document.getElementById('btnGenerarPrefactura').textContent = '📑 Generar Certificación / Prefactura';
+}
+
+function prefUpdateMenuCards(){
+  const ant = prefFilesAntes.length;
+  const alb = prefFilesAlbaran.length;
+  const des = prefFilesDespues.length;
+  const upd = (id, count, label) => {
+    const el = document.getElementById(id);
+    if(!el) return;
+    if(count > 0){
+      el.textContent   = `✓ ${count} archivo(s)`;
+      el.style.color   = 'var(--green)';
+      el.style.fontWeight = '700';
+    } else {
+      el.textContent   = 'Pendiente';
+      el.style.color   = 'var(--text-muted)';
+      el.style.fontWeight = '';
+    }
+  };
+  upd('prefAntesStatus',   ant,  'antes');
+  upd('prefAlbaranStatus', alb,  'albaran');
+  upd('prefDespuesStatus', des,  'despues');
+
+  const hasAny = ant + alb + des > 0;
+  const res = document.getElementById('prefResumenBox');
+  if(res){ res.style.display = hasAny ? '' : 'none'; }
+  const ra = document.getElementById('prefResAntes');   if(ra) ra.textContent = ant;
+  const rl = document.getElementById('prefResAlbaran'); if(rl) rl.textContent = alb;
+  const rd = document.getElementById('prefResDespues'); if(rd) rd.textContent = des;
+}
+
+function prefNav(seccion){
+  _prefSeccionActual = seccion;
+  nav('prefFotos');
+}
+
+function setupPrefFotosScreen(seccion){
+  const cfg = {
+    antes:   { title:'📸 Fotos Antes del Trabajo', sub:'Estado previo a la intervención', ico:'📷', hint:'Máximo 20 fotos por carga', arr:prefFilesAntes },
+    albaran: { title:'📋 Albarán de Trabajos',     sub:'Foto/documento del albarán',       ico:'📋', hint:'Máximo 3 archivos (foto o PDF del albarán)', arr:prefFilesAlbaran, max:3 },
+    despues: { title:'✅ Fotos Después del Trabajo',sub:'Estado tras la finalización',      ico:'✅', hint:'Máximo 20 fotos por carga', arr:prefFilesDespues },
+  };
+  const c = cfg[seccion] || cfg['antes'];
+  const max = c.max || 20;
+
+  document.getElementById('prefFotosTitle').textContent = c.title;
+  document.getElementById('prefFotosSub').textContent   = 'Pedido nº ' + currentPedido + ' · ' + c.sub;
+  document.getElementById('prefFotosBc').innerHTML      = `Certificación › ${currentPedido} › <span>${c.title}</span>`;
+  document.getElementById('prefUploadIco').textContent  = c.ico;
+  document.getElementById('prefUploadSub').textContent  = c.hint;
+  document.getElementById('prefFotosBack').onclick      = () => nav('prefactura');
+
+  // Info box
+  const infoEl = document.getElementById('prefFotosInfoBox');
+  if(seccion === 'albaran'){
+    infoEl.style.display = '';
+    infoEl.innerHTML = '📋 Puedes cargar la foto del albarán en papel, el PDF del albarán digital o cualquier documento de los trabajos realizados.';
+  } else {
+    infoEl.style.display = 'none';
+  }
+
+  prefFilesCurrent = c.arr;
+  updatePrefFotosUI(max);
+
+  // Bind inputs
+  setTimeout(() => bindPrefInputs(max), 50);
+}
+
+function bindPrefInputs(max){
+  const seccion = _prefSeccionActual;
+  const pairs = [
+    ['inputGaleriaPref', e => onPrefFilesAdded(e.target.files, max)],
+    ['inputCamaraPref',  e => onPrefFilesAdded(e.target.files, max)],
+  ];
+  pairs.forEach(([id, handler]) => {
+    const old = document.getElementById(id);
+    if(!old) return;
+    const fresh = old.cloneNode(true);
+    old.parentNode.replaceChild(fresh, old);
+    fresh.addEventListener('change', handler);
+  });
+
+  const zone = document.getElementById('uploadZonePref');
+  if(zone){
+    zone.ondragover = (e) => { e.preventDefault(); zone.classList.add('drag'); };
+    zone.ondragleave = () => zone.classList.remove('drag');
+    zone.ondrop = (e) => { e.preventDefault(); zone.classList.remove('drag'); onPrefFilesAdded(e.dataTransfer.files, max); };
+  }
+}
+
+async function onPrefFilesAdded(files, max){
+  if(!files || !files.length) return;
+  max = max || 20;
+  const arr = Array.from(files);
+  const rem = max - prefFilesCurrent.length;
+  if(rem <= 0){ showToast(`Ya tienes el máximo (${max}) archivos en esta sección.`, 'err'); return; }
+  if(arr.length > rem){ showToast(`Máximo ${max} archivos. Se añaden solo ${rem}.`, 'err'); arr.splice(rem); }
+  const comprimidos = await comprimirArchivos(arr);
+  comprimidos.forEach(f => prefFilesCurrent.push(f));
+  updatePrefFotosUI(max);
+  prefUpdateMenuCards();
+}
+
+function updatePrefFotosUI(max){
+  max = max || 20;
+  const n = prefFilesCurrent.length;
+  const cb = document.getElementById('prefFotosCounter');
+  cb.textContent = `${n} / ${max}`; cb.className = 'counter' + (n > 0 ? ' has' : '');
+  const wrap = document.getElementById('fileListPrefWrap');
+  wrap.style.display = n > 0 ? 'block' : 'none';
+  const el = document.getElementById('fileListPrefEl');
+  el.innerHTML = '';
+  prefFilesCurrent.forEach((f, i) => {
+    const d = document.createElement('div'); d.className = 'file-item';
+    d.innerHTML = `<span class="fi-icon">${getIcon(f.name)}</span><span class="fi-name">${f.name}</span><span class="fi-size">${fmtSize(f.size)}</span><button class="fi-rm" onclick="removePrefFile(${i},${max})">✕</button>`;
+    el.appendChild(d);
+  });
+  document.getElementById('btnPrefConfirmar').disabled = false; // Siempre habilitado para poder volver
+}
+
+function removePrefFile(i, max){
+  prefFilesCurrent.splice(i, 1);
+  updatePrefFotosUI(max);
+  prefUpdateMenuCards();
+}
+
+function clearPrefFiles(){
+  prefFilesCurrent.splice(0, prefFilesCurrent.length);
+  const max = _prefSeccionActual === 'albaran' ? 3 : 20;
+  updatePrefFotosUI(max);
+  prefUpdateMenuCards();
+  const gal = document.getElementById('inputGaleriaPref');
+  if(gal){ gal.value=''; try{gal.type='text';gal.type='file';}catch(_){} }
+  const cam = document.getElementById('inputCamaraPref');
+  if(cam){ cam.value=''; try{cam.type='text';cam.type='file';}catch(_){} }
+}
+
+function prefConfirmarSeccion(){
+  showToast(`✓ ${prefFilesCurrent.length} archivo(s) guardados para esta sección`, 'ok');
+  prefUpdateMenuCards();
+  nav('prefactura');
+}
+
+async function generarPrefactura(){
+  const total = prefFilesAntes.length + prefFilesAlbaran.length + prefFilesDespues.length;
+  if(total === 0){
+    document.getElementById('prefStatus').innerHTML = '<div class="sbox err">⚠ Debes cargar al menos un archivo (fotos antes, albarán o fotos después) antes de generar la certificación.</div>';
+    return;
+  }
+
+  const btn = document.getElementById('btnGenerarPrefactura');
+  btn.disabled = true;
+  btn.textContent = '⏳ Generando certificación...';
+  document.getElementById('prefStatus').innerHTML = '<div class="sbox info">⏳ Procesando imágenes y generando documento de certificación... Esto puede tardar unos segundos.</div>';
+
+  try {
+    // Convertir archivos a base64 para enviar al servidor
+    const toBase64 = async (files) => {
+      const result = [];
+      for(const f of files){
+        const reader = new FileReader();
+        const dataUrl = await new Promise(res => { reader.onload = e => res(e.target.result); reader.readAsDataURL(f); });
+        result.push({ name: f.name, dataUrl, type: f.type });
+      }
+      return result;
+    };
+
+    const [fotosAntes, fotosAlbaran, fotosDespues] = await Promise.all([
+      toBase64(prefFilesAntes),
+      toBase64(prefFilesAlbaran),
+      toBase64(prefFilesDespues),
+    ]);
+
+    const payload = {
+      pedido:       currentPedido,
+      datosExcel:   currentDatosExcel || {},
+      timestamp:    new Date().toLocaleString('es-ES'),
+      fotosAntes,
+      fotosAlbaran,
+      fotosDespues,
+      operario:     currentUser ? currentUser.name : '',
+    };
+
+    const res  = await authFetch('/api/prefactura', { method: 'POST', body: JSON.stringify(payload) });
+    const data = await res.json();
+    if(!data.success) throw new Error(data.error || 'Error desconocido');
+
+    document.getElementById('prefStatus').innerHTML = `<div class="sbox ok">
+      ✓ Certificación / Prefactura generada correctamente<br>
+      📄 <strong>${data.fileName}</strong><br>
+      <span style="font-size:11px;opacity:.8">Guardada en el servidor FTP</span>
+    </div>`;
+    showToast('✓ Certificación generada correctamente', 'ok');
+    btn.textContent = '✓ Certificación generada';
+
+    setTimeout(() => {
+      prefReset();
+      nav('home');
+    }, 5000);
+
+  } catch(e) {
+    document.getElementById('prefStatus').innerHTML = `<div class="sbox err">⚠ Error: ${e.message}</div>`;
+    btn.disabled = false;
+    btn.textContent = '📑 Generar Certificación / Prefactura';
+    showToast('Error al generar la certificación', 'err');
+  }
+}
+
+
 
 </script>
 </body>
