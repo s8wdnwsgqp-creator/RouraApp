@@ -1073,6 +1073,78 @@ app.post('/api/certificacion', requireAuth, async (req, res) => {
   }
 });
 
+// ── GENERADOR DE CERTIFICACIONES / PREFACTURAS (manual desde app) ──────────
+// POST /api/prefactura
+// Body JSON: { pedido, datosExcel, timestamp, fotosAntes[], fotosAlbaran[], fotosDespues[], operario }
+// Genera un PDF de certificación igual al automático pero con las fotos/albarán
+// que el usuario sube manualmente desde la app.
+app.post('/api/prefactura', requireAuth, async (req, res) => {
+  const { pedido, datosExcel, timestamp, fotosAntes, fotosAlbaran, fotosDespues } = req.body;
+  if (!pedido) return res.status(400).json({ success: false, error: 'Falta número de pedido' });
+
+  const operario  = req.body.operario || req.user.name;
+  const fechaHora = timestamp || new Date().toLocaleString('es-ES');
+
+  try {
+    // Convertir base64 a Buffer para cada sección
+    const toBuffers = (arr) => (arr || []).map(f => {
+      if (!f || !f.dataUrl) return null;
+      try {
+        const base64 = f.dataUrl.replace(/^data:[^;]+;base64,/, '');
+        return { name: f.name || 'foto.jpg', buf: Buffer.from(base64, 'base64') };
+      } catch(_) { return null; }
+    }).filter(Boolean);
+
+    const fotosAntesBufs  = toBuffers(fotosAntes);
+    const fotosFinalBufs  = toBuffers(fotosDespues);
+
+    // El albarán: si es imagen lo tratamos como imagen; si es PDF lo tratamos como PDF nativo
+    let albaranBuf  = null;
+    let albImgBufs  = [];
+    for (const f of (fotosAlbaran || [])) {
+      if (!f || !f.dataUrl) continue;
+      const base64 = f.dataUrl.replace(/^data:[^;]+;base64,/, '');
+      const buf    = Buffer.from(base64, 'base64');
+      const name   = f.name || 'albaran.jpg';
+      const type   = (f.type || '').toLowerCase();
+      if (type === 'application/pdf' || /\.pdf$/i.test(name)) {
+        // Primer PDF encontrado lo usamos como albarán nativo
+        if (!albaranBuf) albaranBuf = buf;
+      } else {
+        albImgBufs.push({ name, buf });
+      }
+    }
+
+    // Generar el PDF de certificación reutilizando la función existente
+    const pdfBuf = await generarCertificacion({
+      pedido, datosExcel, fechaHora, operario,
+      fotosAntesBufs,
+      fotosFinalBufs,
+      albaranBuf,
+      albImgBufs
+    });
+
+    // Subir al FTP en la carpeta de Certificacion Final Trabajo
+    const dirCert = path.posix.join(BASE_PATH, 'Certificacion Final Trabajo');
+    const client  = new ftp.Client(300000);
+    client.ftp.verbose = false;
+    try {
+      await client.access(FTP_CONFIG);
+      await ensureDir(client, dirCert);
+      const ts      = tsNombre(req.user.id || '');
+      const pdfName = `${String(pedido).trim()}_${ts}_Certificacion_Prefactura.pdf`;
+      await client.uploadFrom(Readable.from(pdfBuf), path.posix.join(dirCert, pdfName));
+      res.json({ success: true, fileName: pdfName, ruta: `${dirCert}/${pdfName}` });
+    } finally {
+      client.close();
+    }
+
+  } catch(e) {
+    console.error('[prefactura] Error:', e.message, e.stack);
+    res.status(500).json({ success: false, error: 'Error generando certificación/prefactura: ' + e.message });
+  }
+});
+
 // ── FUSIONAR PDF CERTIFICACION + PDF ALBARÁN usando pdf-lib ─────────────────
 // Inserta las páginas del albarán justo después de la portada de sección 3.
 // La portada de sección 3 siempre es la última página antes del albarán.
