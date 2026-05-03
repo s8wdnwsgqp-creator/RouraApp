@@ -2429,6 +2429,135 @@ app.post('/api/inspecciones-seguridad/fotos', requireAuth, upload.array('files',
   }
 });
 
+// ── PROFORMA CUANTITATIVA MAPFRE ────────────────────────────────────────────
+// GET /api/proforma-mapfre?pedido=XXXX
+// Busca el fichero "Proforma Mapfre*" en /www/Proforma y devuelve las filas
+// col A (label fijo) + col B (valor editable) con el tipo de celda original.
+app.get('/api/proforma-mapfre', requireAuth, async (req, res) => {
+  const DIR_PROFORMA = path.posix.join(BASE_PATH, 'Proforma');
+  const client = new ftp.Client(120000);
+  client.ftp.verbose = false;
+  try {
+    await client.access(FTP_CONFIG);
+    await ensureDir(client, DIR_PROFORMA);
+
+    // Buscar fichero cuyo nombre contenga "Proforma Mapfre" (insensible)
+    const list = await ftpListSafe(client, DIR_PROFORMA);
+    const entry = list.find(f => /proforma\s*mapfre/i.test(f.name) && /\.xlsx?$/i.test(f.name));
+    if (!entry) {
+      return res.status(404).json({ success: false, error: 'No se encontró el fichero "Proforma Mapfre" en la carpeta Proforma del FTP.' });
+    }
+
+    // Descargar
+    const pt = new PassThrough(); const chunks = [];
+    pt.on('data', c => chunks.push(c));
+    const done = new Promise((ok, fail) => { pt.on('end', ok); pt.on('error', fail); });
+    await client.downloadTo(pt, path.posix.join(DIR_PROFORMA, entry.name));
+    await done;
+    const buffer = Buffer.concat(chunks);
+
+    // Parsear con XLSX conservando tipos de celda
+    const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
+    const sheetName = wb.SheetNames[0];
+    const ws = wb.Sheets[sheetName];
+
+    // Recorrer filas: columna A (label) + columna B (editable)
+    const ref = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : { e: { r: 0 } };
+    const rows = [];
+    for (let r = 0; r <= ref.e.r; r++) {
+      const cellA = ws[XLSX.utils.encode_cell({ r, c: 0 })]; // Col A
+      const cellB = ws[XLSX.utils.encode_cell({ r, c: 1 })]; // Col B
+      if (!cellA && !cellB) continue;
+      const labelVal = cellA ? (cellA.v !== undefined ? String(cellA.v) : '') : '';
+      if (!labelVal.trim()) continue; // Saltar filas sin etiqueta
+
+      // Tipo de celda B: 'n' número, 's' texto, 'b' booleano, o '' (vacío/texto por defecto)
+      const bType = cellB ? (cellB.t || 's') : 's';
+      const bVal  = cellB ? (cellB.v !== undefined ? cellB.v : '') : '';
+
+      rows.push({
+        rowIndex: r,
+        label: labelVal,
+        value: bVal,
+        type: (bType === 'n') ? 'number' : 'text',
+        // formato numérico si lo tiene, para referencia
+        numFmt: (cellB && cellB.z) ? cellB.z : null,
+      });
+    }
+
+    res.json({ success: true, fileName: entry.name, sheetName, rows,
+               fileBase64: buffer.toString('base64') });
+  } catch (e) {
+    console.error('[proforma-mapfre] Error:', e.message);
+    res.status(500).json({ success: false, error: e.message });
+  } finally {
+    client.close();
+  }
+});
+
+// POST /api/guardar-proforma
+// Body JSON: { pedido, fileName, fileBase64, filledRows: [{rowIndex, value}] }
+// Carga el fichero original (base64), rellena los valores de col B manteniendo
+// el formato de celda original, escribe el nº de pedido en E1, y sube a
+// Albaranes Final Trabajo.
+app.post('/api/guardar-proforma', requireAuth, async (req, res) => {
+  const { pedido, fileName, fileBase64, filledRows } = req.body;
+  if (!pedido || !fileBase64) return res.status(400).json({ success: false, error: 'Faltan datos (pedido o fichero)' });
+
+  try {
+    const buffer = Buffer.from(fileBase64, 'base64');
+    const wb     = XLSX.read(buffer, { type: 'buffer', cellDates: true, cellStyles: true });
+    const sheetName = wb.SheetNames[0];
+    const ws     = wb.Sheets[sheetName];
+
+    // Rellenar col B con los valores introducidos por el usuario
+    (filledRows || []).forEach(({ rowIndex, value, type }) => {
+      const addr = XLSX.utils.encode_cell({ r: rowIndex, c: 1 });
+      const existingCell = ws[addr] || {};
+      const numericVal = (type === 'number' && value !== '' && value !== null && value !== undefined)
+        ? parseFloat(String(value).replace(',', '.'))
+        : null;
+      ws[addr] = {
+        ...existingCell,
+        t: (type === 'number' && numericVal !== null && !isNaN(numericVal)) ? 'n' : 's',
+        v: (type === 'number' && numericVal !== null && !isNaN(numericVal)) ? numericVal : String(value ?? ''),
+      };
+      if (type === 'number' && numericVal !== null && !isNaN(numericVal)) {
+        ws[addr].w = String(numericVal);
+      }
+    });
+
+    // Escribir número de pedido en celda E1
+    const e1 = ws['E1'] || {};
+    ws['E1'] = { ...e1, t: 's', v: String(pedido).trim() };
+
+    // Generar buffer del Excel modificado manteniendo bookType original
+    const ext = (fileName || '').toLowerCase().endsWith('.xls') ? 'xls' : 'xlsx';
+    const outBuf = XLSX.write(wb, { type: 'buffer', bookType: ext, cellStyles: true });
+
+    // Subir al FTP en Albaranes Final Trabajo
+    const dirDest = path.posix.join(BASE_PATH, 'Albaranes Final Trabajo');
+    const ts      = tsNombre(req.user.id || '');
+    const baseName = (fileName || 'Proforma_Mapfre.xlsx').replace(/\.xlsx?$/i, '');
+    const outName  = `${String(pedido).trim()}_${ts}_${baseName}.${ext}`;
+
+    const client = new ftp.Client(120000);
+    client.ftp.verbose = false;
+    try {
+      await client.access(FTP_CONFIG);
+      await ensureDir(client, dirDest);
+      await client.uploadFrom(Readable.from(outBuf), path.posix.join(dirDest, outName));
+    } finally {
+      client.close();
+    }
+
+    res.json({ success: true, fileName: outName });
+  } catch (e) {
+    console.error('[guardar-proforma] Error:', e.message);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 // ── GLOBAL ERROR HANDLER (siempre devuelve JSON) ─────────────
 app.use((err, req, res, next) => {
   console.error('Error no controlado:', err.message);
