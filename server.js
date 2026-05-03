@@ -2615,6 +2615,76 @@ app.get('/api/sies-disponibles', requireAuth, async (req, res) => {
   }
 });
 
+// ── DOCUMENTACIÓN OBRA ───────────────────────────────────────────────────────
+
+// GET /api/doc-obra/pic?pedido=XXXXX
+// Busca en la carpeta FTP /www/PIC el archivo cuyo nombre empiece por el número de pedido
+// y lo descarga al dispositivo del usuario.
+app.get('/api/doc-obra/pic', requireAuth, async (req, res) => {
+  const pedido = (req.query.pedido || '').trim();
+  if (!pedido) return res.status(400).json({ success: false, error: 'Falta el número de proyecto' });
+
+  const DIR_PIC = path.posix.join(BASE_PATH, 'PIC');
+  const client  = new ftp.Client(120000);
+  client.ftp.verbose = false;
+  try {
+    await client.access(FTP_CONFIG);
+    const list = await ftpListSafe(client, DIR_PIC);
+    // Buscar archivo cuyo nombre empiece por el número de pedido (insensible a mayúsculas)
+    const entry = list.find(f => f.name.toLowerCase().startsWith(pedido.toLowerCase()) && f.type !== 2);
+    if (!entry) {
+      return res.status(404).json({ success: false, error: `No se encontró ningún PIC que empiece por "${pedido}" en la carpeta PIC del servidor.` });
+    }
+    const remotePath = path.posix.join(DIR_PIC, entry.name);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(entry.name)}"`);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    await client.downloadTo(res, remotePath);
+  } catch (e) {
+    console.error('[doc-obra/pic] Error:', e.message);
+    if (!res.headersSent) res.status(500).json({ success: false, error: e.message });
+  } finally {
+    client.close();
+  }
+});
+
+// GET /api/doc-obra/plan-medidas?tipo=REPSOL_MTO|REPSOL_CAMPANA|MAPFRE|OTROS
+// Busca en la carpeta FTP /www/Plan Medidas Preventivas el archivo que coincida con el tipo.
+app.get('/api/doc-obra/plan-medidas', requireAuth, async (req, res) => {
+  const tipo = (req.query.tipo || '').trim();
+  if (!tipo) return res.status(400).json({ success: false, error: 'Falta el tipo de plan' });
+
+  // Mapa de tipo a patrón de búsqueda en nombre de archivo
+  const patronMap = {
+    'REPSOL_MTO':     /repsol.*mto/i,
+    'REPSOL_CAMPANA': /repsol.*campa/i,
+    'MAPFRE':         /mapfre/i,
+    'OTROS':          /otros\s*clientes|otros$/i,
+  };
+  const patron = patronMap[tipo];
+  if (!patron) return res.status(400).json({ success: false, error: 'Tipo de plan no reconocido' });
+
+  const DIR_PLAN = path.posix.join(BASE_PATH, 'Plan Medidas Preventivas');
+  const client   = new ftp.Client(120000);
+  client.ftp.verbose = false;
+  try {
+    await client.access(FTP_CONFIG);
+    const list = await ftpListSafe(client, DIR_PLAN);
+    const entry = list.find(f => patron.test(f.name) && f.type !== 2);
+    if (!entry) {
+      return res.status(404).json({ success: false, error: `No se encontró el plan "${tipo}" en la carpeta "Plan Medidas Preventivas" del servidor.` });
+    }
+    const remotePath = path.posix.join(DIR_PLAN, entry.name);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(entry.name)}"`);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    await client.downloadTo(res, remotePath);
+  } catch (e) {
+    console.error('[doc-obra/plan-medidas] Error:', e.message);
+    if (!res.headersSent) res.status(500).json({ success: false, error: e.message });
+  } finally {
+    client.close();
+  }
+});
+
 // ── GLOBAL ERROR HANDLER (siempre devuelve JSON) ─────────────
 app.use((err, req, res, next) => {
   console.error('Error no controlado:', err.message);
