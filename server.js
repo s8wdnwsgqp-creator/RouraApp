@@ -2442,6 +2442,65 @@ app.post('/api/inspecciones-seguridad/fotos', requireAuth, upload.array('files',
   }
 });
 
+// ── DESCARGAR PROFORMA GENÉRICO (por SIE) ───────────────────────────────────
+// GET /api/doc-proforma/generico?sie=NOMBRE_SIE
+// Busca en /www/Proforma un archivo "Proforma <SIE>*" y lo descarga directamente.
+app.get('/api/doc-proforma/generico', requireAuth, async (req, res) => {
+  const sie = (req.query.sie || '').trim();
+  if (!sie) return res.status(400).json({ success: false, error: 'Falta el nombre del SIE' });
+
+  const DIR_PROFORMA = path.posix.join(BASE_PATH, 'Proforma');
+  const client = new ftp.Client(120000);
+  client.ftp.verbose = false;
+  try {
+    await client.access(FTP_CONFIG);
+    const list = await ftpListSafe(client, DIR_PROFORMA);
+    // Nombre empieza por "Proforma " + SIE (insensible a mayúsculas)
+    const escaped = sie.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp('^proforma\\s+' + escaped, 'i');
+    const entry = list.find(f => pattern.test(f.name) && f.type !== 2);
+    if (!entry) {
+      return res.status(404).json({ success: false, error: `No se encontró "Proforma ${sie}*" en la carpeta Proforma del servidor.` });
+    }
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(entry.name)}`);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    await client.downloadTo(res, path.posix.join(DIR_PROFORMA, entry.name));
+  } catch (e) {
+    console.error('[doc-proforma/generico] Error:', e.message);
+    if (!res.headersSent) res.status(500).json({ success: false, error: e.message });
+  } finally {
+    client.close();
+  }
+});
+
+// ── DESCARGAR PROFORMA PROYECTO (por número de proyecto) ────────────────────
+// GET /api/doc-proforma/proyecto?pedido=XXXXX
+// Busca en /www/Proforma un archivo cuyo nombre empiece por el número de proyecto.
+app.get('/api/doc-proforma/proyecto', requireAuth, async (req, res) => {
+  const pedido = (req.query.pedido || '').trim();
+  if (!pedido) return res.status(400).json({ success: false, error: 'Falta el número de proyecto' });
+
+  const DIR_PROFORMA = path.posix.join(BASE_PATH, 'Proforma');
+  const client = new ftp.Client(120000);
+  client.ftp.verbose = false;
+  try {
+    await client.access(FTP_CONFIG);
+    const list = await ftpListSafe(client, DIR_PROFORMA);
+    const entry = list.find(f => f.name.toLowerCase().startsWith(pedido.toLowerCase()) && f.type !== 2);
+    if (!entry) {
+      return res.status(404).json({ success: false, error: `No se encontró ningún archivo de Proforma que empiece por "${pedido}" en la carpeta Proforma del servidor.` });
+    }
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(entry.name)}`);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    await client.downloadTo(res, path.posix.join(DIR_PROFORMA, entry.name));
+  } catch (e) {
+    console.error('[doc-proforma/proyecto] Error:', e.message);
+    if (!res.headersSent) res.status(500).json({ success: false, error: e.message });
+  } finally {
+    client.close();
+  }
+});
+
 // ── PROFORMA CUANTITATIVA MAPFRE ────────────────────────────────────────────
 // GET /api/proforma-mapfre?pedido=XXXX
 // Busca el fichero "Proforma Mapfre*" en /www/Proforma y devuelve las filas
