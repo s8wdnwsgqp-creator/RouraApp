@@ -1356,24 +1356,63 @@ tr:hover .dld-btn{opacity:1}
 </div>
 
 <!-- ══════════════════════════════════════════════════════════
-     DOCUMENTACIÓN OBRA — PIC / Planos
+     DOCUMENTACIÓN OBRA — PIC / Planos  (paso 1: número proyecto)
 ════════════════════════════════════════════════════════════ -->
 <div id="screenDocObraPIC" class="screen">
   <div class="sub-bar">
     <button class="back-btn" onclick="nav('docObra')">← Atrás</button>
-    <span class="breadcrumb">Inicio › Documentación Obra › <span>PIC / Planos</span></span>
+    <span class="breadcrumb">Inicio › Doc. Obra › <span>PIC / Planos</span></span>
   </div>
   <div class="ped-wrap">
     <div class="ped-icon">📐</div>
     <div class="ped-title">PIC / Planos del Proyecto</div>
-    <div class="ped-sub">Introduce el número de proyecto para descargar el PIC correspondiente</div>
+    <div class="ped-sub">Introduce el número de proyecto para validar y descargar el PIC</div>
     <div class="form-group" style="width:100%">
       <div class="form-label">Número de Proyecto</div>
       <input type="text" id="inputPIC" class="form-input" placeholder="Ej: 2025001" autocomplete="off"
-             onkeydown="if(event.key==='Enter')descargarPIC()"/>
+             onkeydown="if(event.key==='Enter')buscarProyectoPIC()"/>
     </div>
-    <button class="btn btn-primary btn-lg btn-full" onclick="descargarPIC()">⬇ Descargar PIC</button>
-    <div id="picStatus"></div>
+    <button class="btn btn-primary btn-lg btn-full" onclick="buscarProyectoPIC()">Buscar Proyecto →</button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     DOCUMENTACIÓN OBRA — PIC / Planos  (paso 2: confirmación)
+════════════════════════════════════════════════════════════ -->
+<div id="screenDocObraPICConfirm" class="screen">
+  <div class="sub-bar">
+    <button class="back-btn" onclick="nav('docObraPIC')">← Atrás</button>
+    <span class="breadcrumb">Inicio › Doc. Obra › PIC › <span>Confirmar Proyecto</span></span>
+  </div>
+  <div class="confirm-wrap">
+    <!-- Loading -->
+    <div id="picConfirmLoading" class="confirm-loading">
+      <div class="spinner"></div><span>Buscando proyecto en el sistema...</span>
+    </div>
+    <!-- Datos confirmados -->
+    <div id="picConfirmData" style="display:none;flex-direction:column;gap:0">
+      <div class="confirm-header">
+        <div class="confirm-header-icon">📐</div>
+        <div class="confirm-header-text">
+          <h3>Confirma los datos del proyecto</h3>
+          <p id="picConfirmNum">Proyecto nº —</p>
+        </div>
+      </div>
+      <div class="confirm-body">
+        <div class="confirm-field"><div class="confirm-field-label">SIE</div><div class="confirm-field-value" id="picCfSIE">—</div></div>
+        <div class="confirm-field"><div class="confirm-field-label">RefCli</div><div class="confirm-field-value" id="picCfRefCli">—</div></div>
+        <div class="confirm-field"><div class="confirm-field-label">PA</div><div class="confirm-field-value" id="picCfPA">—</div></div>
+        <div class="confirm-field"><div class="confirm-field-label">Ciudad</div><div class="confirm-field-value" id="picCfCiudad">—</div></div>
+        <div class="confirm-field"><div class="confirm-field-label">Dirección</div><div class="confirm-field-value" id="picCfDireccion">—</div></div>
+        <div class="confirm-field"><div class="confirm-field-label">Provincia</div><div class="confirm-field-value" id="picCfProvincia">—</div></div>
+        <div class="confirm-field"><div class="confirm-field-label">Descripción</div><div class="confirm-field-value" id="picCfDescripcion">—</div></div>
+      </div>
+      <div id="picDescargaStatus" style="padding:0 16px 8px"></div>
+      <div class="confirm-actions">
+        <button class="btn btn-success btn-full btn-lg" id="btnDescargaPIC" onclick="confirmarDescargaPIC()">⬇ Confirmar y Descargar PIC</button>
+        <button class="btn btn-full" onclick="nav('docObraPIC')">✕ Cancelar — Volver</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1583,30 +1622,77 @@ async function doLogout(){
   token=null;currentUser=null;sessionStorage.clear();window.location.reload();
 }
 
-// ── DOCUMENTACIÓN OBRA ───────────────────────────────────────
-async function descargarPIC(){
-  const v=document.getElementById('inputPIC').value.trim();
-  if(!v){showToast('Introduce el número de proyecto','err');return;}
-  const statusEl=document.getElementById('picStatus');
-  statusEl.innerHTML='<div class="sbox info" style="margin-top:12px">⏳ Buscando PIC en el servidor...</div>';
+// ── DOCUMENTACIÓN OBRA — PIC / PLANOS ───────────────────────
+let _picProyectoActual = '';   // número de proyecto validado
+
+async function buscarProyectoPIC(){
+  const v = document.getElementById('inputPIC').value.trim();
+  if(!v){ showToast('Introduce el número de proyecto','err'); return; }
+  _picProyectoActual = v;
+  // Navegar a la pantalla de confirmación y mostrar loading
+  nav('docObraPICConfirm');
+  document.getElementById('picConfirmLoading').style.display = 'flex';
+  document.getElementById('picConfirmData').style.display    = 'none';
+  document.getElementById('picDescargaStatus').innerHTML     = '';
+  document.getElementById('btnDescargaPIC').disabled         = false;
+  document.getElementById('btnDescargaPIC').textContent      = '⬇ Confirmar y Descargar PIC';
   try{
-    const res=await authFetch('/api/doc-obra/pic?pedido='+encodeURIComponent(v));
-    if(!res.ok){
-      const err=await res.json().catch(()=>({error:'Error desconocido'}));
-      statusEl.innerHTML=`<div class="sbox err" style="margin-top:12px">⚠ ${err.error||'No se pudo descargar el PIC'}</div>`;
+    const res  = await authFetch('/api/buscar-pedido?pedido='+encodeURIComponent(v));
+    const data = await res.json();
+    document.getElementById('picConfirmLoading').style.display = 'none';
+    if(!data.success || !data.found){
+      showToast('⚠ '+(data.error||'Proyecto no encontrado en el sistema'),'err');
+      setTimeout(()=>nav('docObraPIC'), 2200);
       return;
     }
-    // Forzar descarga en el dispositivo
-    const blob=await res.blob();
-    const cd=res.headers.get('Content-Disposition')||'';
-    const match=cd.match(/filename="?([^"]+)"?/);
-    const fileName=match?decodeURIComponent(match[1]):'PIC_'+v+'.pdf';
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');a.href=url;a.download=fileName;a.click();
-    setTimeout(()=>URL.revokeObjectURL(url),5000);
-    statusEl.innerHTML=`<div class="sbox ok" style="margin-top:12px">✓ PIC descargado: <b>${fileName}</b></div>`;
+    const d = data.datos;
+    document.getElementById('picConfirmNum').textContent    = 'Proyecto nº '+v;
+    document.getElementById('picCfSIE').textContent         = d.SIE||'—';
+    document.getElementById('picCfRefCli').textContent      = d.RefCli||'—';
+    document.getElementById('picCfPA').textContent          = d.PA||'—';
+    document.getElementById('picCfCiudad').textContent      = d.Ciudad||'—';
+    document.getElementById('picCfDireccion').textContent   = d.Direccion||'—';
+    document.getElementById('picCfProvincia').textContent   = d.Provincia||'—';
+    document.getElementById('picCfDescripcion').textContent = d.Descripcion||'—';
+    document.getElementById('picConfirmData').style.display = 'flex';
   }catch(e){
-    statusEl.innerHTML=`<div class="sbox err" style="margin-top:12px">⚠ Error: ${e.message}</div>`;
+    document.getElementById('picConfirmLoading').style.display = 'none';
+    showToast('Error: '+e.message,'err');
+    setTimeout(()=>nav('docObraPIC'), 2200);
+  }
+}
+
+async function confirmarDescargaPIC(){
+  const v = _picProyectoActual;
+  if(!v) return;
+  const btn      = document.getElementById('btnDescargaPIC');
+  const statusEl = document.getElementById('picDescargaStatus');
+  btn.disabled   = true;
+  btn.textContent = '⏳ Buscando PIC en el servidor...';
+  statusEl.innerHTML = '';
+  try{
+    const res = await authFetch('/api/doc-obra/pic?pedido='+encodeURIComponent(v));
+    if(!res.ok){
+      const err = await res.json().catch(()=>({error:'Error desconocido'}));
+      statusEl.innerHTML = `<div class="sbox err">⚠ ${err.error||'No se pudo descargar el PIC'}</div>`;
+      btn.disabled = false;
+      btn.textContent = '⬇ Reintentar descarga';
+      return;
+    }
+    const blob = await res.blob();
+    const cd   = res.headers.get('Content-Disposition')||'';
+    const match = cd.match(/filename\*?=(?:UTF-8'')?([^;\r\n]+)/i);
+    const fileName = match ? decodeURIComponent(match[1].replace(/"/g,'')) : 'PIC_'+v+'.pdf';
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download=fileName; a.click();
+    setTimeout(()=>URL.revokeObjectURL(url), 5000);
+    statusEl.innerHTML = `<div class="sbox ok">✓ PIC descargado: <b>${fileName}</b></div>`;
+    showToast('✓ PIC descargado correctamente','ok');
+    btn.textContent = '✓ Descargado';
+  }catch(e){
+    statusEl.innerHTML = `<div class="sbox err">⚠ Error: ${e.message}</div>`;
+    btn.disabled = false;
+    btn.textContent = '⬇ Reintentar descarga';
   }
 }
 async function descargarPlanMedidas(tipo){
@@ -1766,7 +1852,7 @@ function _onVisibilityGeo(){
 // ── NAV ──────────────────────────────────────────────────────
 function nav(s,p){
   document.querySelectorAll('.screen').forEach(el=>el.classList.remove('active'));
-  const map={home:'screenHome',explorer:'screenExplorer',cargar:'screenCargar',pedido:'screenPedido',confirmPedido:'screenConfirmPedido',medicion:'screenMedicion',instalacion:'screenInstalacion',fotos:'screenFotos',fotosInst:'screenFotosInst',albaran:'screenAlbaran',usuarios:'screenUsuarios',mapa:'screenMapa',cfo:'screenCFO',cfoInc:'screenCFOInc',cierreCFO:'screenCierreCFO',informeVisitas:'screenInformeVisitas',expediciones:'screenExpediciones',expedFotos:'screenExpedFotos',fotosInspSeguridad:'screenFotosInspSeguridad',prefactura:'screenPrefactura',prefFotos:'screenPrefFotos',proforma:'screenProforma',configProforma:'screenConfigProforma',docObra:'screenDocObra',docObraPIC:'screenDocObraPIC',docObraSeguridad:'screenDocObraSeguridad',docObraPlanMedidas:'screenDocObraPlanMedidas'};
+  const map={home:'screenHome',explorer:'screenExplorer',cargar:'screenCargar',pedido:'screenPedido',confirmPedido:'screenConfirmPedido',medicion:'screenMedicion',instalacion:'screenInstalacion',fotos:'screenFotos',fotosInst:'screenFotosInst',albaran:'screenAlbaran',usuarios:'screenUsuarios',mapa:'screenMapa',cfo:'screenCFO',cfoInc:'screenCFOInc',cierreCFO:'screenCierreCFO',informeVisitas:'screenInformeVisitas',expediciones:'screenExpediciones',expedFotos:'screenExpedFotos',fotosInspSeguridad:'screenFotosInspSeguridad',prefactura:'screenPrefactura',prefFotos:'screenPrefFotos',proforma:'screenProforma',configProforma:'screenConfigProforma',docObra:'screenDocObra',docObraPIC:'screenDocObraPIC',docObraPICConfirm:'screenDocObraPICConfirm',docObraSeguridad:'screenDocObraSeguridad',docObraPlanMedidas:'screenDocObraPlanMedidas'};
   const el=document.getElementById(map[s]);if(el)el.classList.add('active');
   if(s==='explorer'&&expItems.length===0)expLoad('/');
   if(s==='fotos')setupFotosScreen(p);
@@ -3429,20 +3515,124 @@ function renderCfgSies(){
 
   visibles.forEach((sie, idx) => {
     const checked = _cfgSiesSeleccionados.includes(sie);
-    const row = document.createElement('label');
-    row.style.cssText = `display:flex;align-items:center;gap:12px;padding:11px 14px;cursor:pointer;border-bottom:1px solid var(--border);transition:background .15s;${checked ? 'background:rgba(13,148,136,.06)' : (idx%2===0?'background:var(--surface)':'background:var(--surface-2,#f8f9fa)')}`;
-    row.innerHTML = `
-      <input type="checkbox" data-sie="${sie}" ${checked ? 'checked' : ''}
+    const sieId   = 'sie_' + idx;
+    const panelId = 'panel_' + idx;
+
+    // Fila principal
+    const row = document.createElement('div');
+    row.style.cssText = `border-bottom:1px solid var(--border)`;
+
+    // Cabecera de la fila (checkbox + nombre + botón descarga)
+    const header = document.createElement('div');
+    header.style.cssText = `display:flex;align-items:center;gap:10px;padding:10px 14px;${checked ? 'background:rgba(13,148,136,.06)' : (idx%2===0?'background:var(--surface)':'background:var(--surface-2,#f8f9fa)')}`;
+    header.innerHTML = `
+      <input type="checkbox" id="${sieId}" data-sie="${sie}" ${checked ? 'checked' : ''}
         style="width:17px;height:17px;cursor:pointer;accent-color:#0d9488;flex-shrink:0"
         onchange="toggleCfgSie('${sie.replace(/'/g,"\\'")}', this.checked)"/>
-      <div style="flex:1;min-width:0">
+      <label for="${sieId}" style="flex:1;min-width:0;cursor:pointer">
         <div style="font-size:13px;font-weight:${checked?'700':'500'};color:${checked?'#0d9488':'var(--text)'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sie}</div>
         ${checked ? '<div style="font-size:10px;color:#0d9488;font-weight:600;margin-top:1px">✓ Proforma activa</div>' : ''}
-      </div>
-      ${checked ? '<span style="font-size:18px">✅</span>' : '<span style="font-size:18px;opacity:.2">☐</span>'}
+      </label>
+      ${checked ? '<span style="font-size:16px;flex-shrink:0">✅</span>' : '<span style="font-size:16px;opacity:.2;flex-shrink:0">☐</span>'}
+      <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;background:var(--brand);color:#fff;border-color:var(--brand)"
+        onclick="toggleProformaPanel('${panelId}','${sie.replace(/'/g,"\\'")}',${idx})">⬇ Proforma</button>
     `;
+
+    // Panel desplegable de descarga (oculto por defecto)
+    const panel = document.createElement('div');
+    panel.id = panelId;
+    panel.style.cssText = 'display:none;flex-direction:column;gap:10px;padding:14px 16px;background:var(--surface-2,#f0f4f8);border-top:1px solid var(--border)';
+    panel.innerHTML = `
+      <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:2px">📂 Descargar Proforma para <span style="color:var(--brand)">${sie}</span></div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <!-- Proforma Genérico -->
+        <button class="btn btn-primary btn-full" style="font-size:12px;justify-content:flex-start;gap:8px;text-align:left"
+          onclick="descargarProformaGenerico('${sie.replace(/'/g,"\\'")}','pfStatusG_${idx}')">
+          📄 Proforma Genérico &nbsp;<span style="font-size:10px;opacity:.7">(busca "Proforma ${sie}" en FTP)</span>
+        </button>
+        <div id="pfStatusG_${idx}"></div>
+        <!-- Proforma Proyecto -->
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:8px">
+          <div style="font-size:12px;font-weight:600;color:var(--text)">📁 Proforma Proyecto</div>
+          <div style="font-size:11px;color:var(--text-muted)">Introduce el número de proyecto para buscar su Proforma específica</div>
+          <input type="text" id="pfPedido_${idx}" class="form-input" placeholder="Nº de proyecto" autocomplete="off"
+            style="font-size:13px;padding:8px 10px"
+            onkeydown="if(event.key==='Enter')descargarProformaProyecto(this.value,'pfStatusP_${idx}')"/>
+          <button class="btn btn-primary btn-full" style="font-size:12px"
+            onclick="descargarProformaProyecto(document.getElementById('pfPedido_${idx}').value,'pfStatusP_${idx}')">
+            ⬇ Buscar y Descargar
+          </button>
+          <div id="pfStatusP_${idx}"></div>
+        </div>
+      </div>
+    `;
+
+    row.appendChild(header);
+    row.appendChild(panel);
     lista.appendChild(row);
   });
+}
+
+// Panel de descarga proforma: toggle visible/oculto
+function toggleProformaPanel(panelId, sie, idx){
+  const panel = document.getElementById(panelId);
+  if(!panel) return;
+  // Cerrar todos los otros paneles abiertos
+  document.querySelectorAll('#cfgSieLista [id^="panel_"]').forEach(p => {
+    if(p.id !== panelId) p.style.display = 'none';
+  });
+  panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
+  if(panel.style.display === 'flex') panel.scrollIntoView({ behavior:'smooth', block:'nearest' });
+}
+
+async function descargarProformaGenerico(sie, statusId){
+  const statusEl = document.getElementById(statusId);
+  if(!statusEl) return;
+  statusEl.innerHTML = '<span style="font-size:11px;color:var(--text-muted)">⏳ Buscando en FTP...</span>';
+  try{
+    const res = await authFetch('/api/doc-proforma/generico?sie='+encodeURIComponent(sie));
+    if(!res.ok){
+      const err = await res.json().catch(()=>({error:'Error desconocido'}));
+      statusEl.innerHTML = `<div class="sbox err" style="font-size:11px;padding:7px 10px">⚠ ${err.error||'No encontrado'}</div>`;
+      return;
+    }
+    const blob = await res.blob();
+    const cd   = res.headers.get('Content-Disposition')||'';
+    const match = cd.match(/filename\*?=(?:UTF-8'')?([^;\r\n]+)/i);
+    const fileName = match ? decodeURIComponent(match[1].replace(/"/g,'')) : `Proforma ${sie}.xlsx`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download=fileName; a.click();
+    setTimeout(()=>URL.revokeObjectURL(url), 5000);
+    statusEl.innerHTML = `<div class="sbox ok" style="font-size:11px;padding:7px 10px">✓ Descargado: <b>${fileName}</b></div>`;
+  }catch(e){
+    statusEl.innerHTML = `<div class="sbox err" style="font-size:11px;padding:7px 10px">⚠ ${e.message}</div>`;
+  }
+}
+
+async function descargarProformaProyecto(pedido, statusId){
+  const statusEl = document.getElementById(statusId);
+  if(!statusEl) return;
+  const v = (pedido||'').trim();
+  if(!v){ statusEl.innerHTML = '<div class="sbox err" style="font-size:11px;padding:7px 10px">⚠ Introduce el número de proyecto</div>'; return; }
+  statusEl.innerHTML = '<span style="font-size:11px;color:var(--text-muted)">⏳ Buscando en FTP...</span>';
+  try{
+    const res = await authFetch('/api/doc-proforma/proyecto?pedido='+encodeURIComponent(v));
+    if(!res.ok){
+      const err = await res.json().catch(()=>({error:'Error desconocido'}));
+      statusEl.innerHTML = `<div class="sbox err" style="font-size:11px;padding:7px 10px">⚠ ${err.error||'No encontrado'}</div>`;
+      return;
+    }
+    const blob = await res.blob();
+    const cd   = res.headers.get('Content-Disposition')||'';
+    const match = cd.match(/filename\*?=(?:UTF-8'')?([^;\r\n]+)/i);
+    const fileName = match ? decodeURIComponent(match[1].replace(/"/g,'')) : `Proforma_${v}.xlsx`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download=fileName; a.click();
+    setTimeout(()=>URL.revokeObjectURL(url), 5000);
+    statusEl.innerHTML = `<div class="sbox ok" style="font-size:11px;padding:7px 10px">✓ Descargado: <b>${fileName}</b></div>`;
+  }catch(e){
+    statusEl.innerHTML = `<div class="sbox err" style="font-size:11px;padding:7px 10px">⚠ ${e.message}</div>`;
+  }
 }
 
 function toggleCfgSie(sie, checked){
