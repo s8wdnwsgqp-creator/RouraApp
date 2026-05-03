@@ -648,7 +648,7 @@ tr:hover .dld-btn{opacity:1}
 
       <!-- Info box -->
       <div class="sbox info" style="font-size:12px;line-height:1.5">
-        📋 <b>¿Cómo funciona?</b> Cuando un operario finaliza las fotos de un trabajo de instalación y el pedido pertenece a uno de los SIEs marcados aquí, el sistema le solicitará cumplimentar la <b>Proforma Cuantitativa de Trabajos</b> antes de pasar al albarán. Si el SIE no está marcado, el flujo continúa directamente al albarán sin Proforma.
+        📋 <b>¿Cómo funciona?</b> Selecciona los SIEs que requieren Proforma y elige el tipo para cada uno. <b>Proforma Genérico</b>: busca en la carpeta Proforma un archivo llamado "Proforma [SIE]". <b>Proforma Proyecto</b>: busca un archivo cuyo nombre empiece por el número de proyecto del pedido. Si el SIE no está marcado, el flujo continúa sin Proforma.
       </div>
 
       <!-- Buscador -->
@@ -1367,12 +1367,12 @@ tr:hover .dld-btn{opacity:1}
     <div class="ped-icon">📐</div>
     <div class="ped-title">PIC / Planos del Proyecto</div>
     <div class="ped-sub">Introduce el número de proyecto para validar y descargar el PIC</div>
-    <div class="form-group" style="width:100%">
+    <div class="form-group" style="width:100%;max-width:280px">
       <div class="form-label">Número de Proyecto</div>
       <input type="text" id="inputPIC" class="form-input" placeholder="Ej: 2025001" autocomplete="off"
              onkeydown="if(event.key==='Enter')buscarProyectoPIC()"/>
     </div>
-    <button class="btn btn-primary btn-lg btn-full" onclick="buscarProyectoPIC()">Buscar Proyecto →</button>
+    <button class="btn btn-primary btn-lg" style="width:280px;justify-content:center" onclick="buscarProyectoPIC()">Buscar Proyecto →</button>
   </div>
 </div>
 
@@ -1526,6 +1526,7 @@ const API=window.location.origin;
 let token=null,currentUser=null;
 let currentFlujo='',currentPedido='',instFase='',albaranTipo='',currentDatosExcel=null,_lastDatosExcel=null;
 let _proformaSIEsActivos = [];  // SIEs con Proforma activada, cargados al login
+let _proformaTiposActivos = {}; // { [sie]: 'generico'|'proyecto' }, cargado al login
 let medFiles=[],medLotes=[];
 let instFiles=[],instAntesLotes=[],instFinLotes=[];
 let sigDrawing=false,sigCtx=null;
@@ -1581,7 +1582,7 @@ function showApp(){
   // Cargar SIEs con Proforma activa (solo internos; externos no lo necesitan)
   if(!esExterno){
     authFetch('/api/config/proforma').then(r=>r.json()).then(d=>{
-      if(d.success) _proformaSIEsActivos = d.proformaSIEs || [];
+      if(d.success){ _proformaSIEsActivos = d.proformaSIEs || []; _proformaTiposActivos = d.proformaTipos || {}; }
     }).catch(()=>{});
   }
 
@@ -3460,7 +3461,8 @@ async function crearUsuario() {
 // ══════════════════════════════════════════════════════════════
 
 let _cfgSiesDisponibles = [];   // todos los SIEs del Excel
-let _cfgSiesSeleccionados = []; // SIEs actualmente marcados
+let _cfgSiesSeleccionados = []; // SIEs actualmente marcados (con proforma activa)
+let _cfgProformaTipos = {};     // { [sie]: 'generico' | 'proyecto' }
 let _cfgFiltro = '';
 
 async function setupConfigProformaScreen(){
@@ -3482,6 +3484,7 @@ async function setupConfigProformaScreen(){
 
     _cfgSiesDisponibles   = resSies.sies || [];
     _cfgSiesSeleccionados = resCfg.success ? [...(resCfg.proformaSIEs || [])] : [];
+    _cfgProformaTipos     = resCfg.success ? Object.assign({}, resCfg.proformaTipos || {}) : {};
 
     renderCfgSies();
     actualizarContadores();
@@ -3515,14 +3518,14 @@ function renderCfgSies(){
 
   visibles.forEach((sie, idx) => {
     const checked = _cfgSiesSeleccionados.includes(sie);
+    const tipo    = _cfgProformaTipos[sie] || 'generico'; // default generico
     const sieId   = 'sie_' + idx;
-    const panelId = 'panel_' + idx;
 
     // Fila principal
     const row = document.createElement('div');
     row.style.cssText = `border-bottom:1px solid var(--border)`;
 
-    // Cabecera de la fila (checkbox + nombre + botón descarga)
+    // Cabecera: checkbox + nombre SIE
     const header = document.createElement('div');
     header.style.cssText = `display:flex;align-items:center;gap:10px;padding:10px 14px;${checked ? 'background:rgba(13,148,136,.06)' : (idx%2===0?'background:var(--surface)':'background:var(--surface-2,#f8f9fa)')}`;
     header.innerHTML = `
@@ -3531,118 +3534,58 @@ function renderCfgSies(){
         onchange="toggleCfgSie('${sie.replace(/'/g,"\\'")}', this.checked)"/>
       <label for="${sieId}" style="flex:1;min-width:0;cursor:pointer">
         <div style="font-size:13px;font-weight:${checked?'700':'500'};color:${checked?'#0d9488':'var(--text)'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sie}</div>
-        ${checked ? '<div style="font-size:10px;color:#0d9488;font-weight:600;margin-top:1px">✓ Proforma activa</div>' : ''}
+        ${checked ? `<div style="font-size:10px;color:#0d9488;font-weight:600;margin-top:1px">✓ Proforma activa · ${tipo==='proyecto'?'Proforma Proyecto':'Proforma Genérico'}</div>` : ''}
       </label>
       ${checked ? '<span style="font-size:16px;flex-shrink:0">✅</span>' : '<span style="font-size:16px;opacity:.2;flex-shrink:0">☐</span>'}
-      <button class="btn" style="font-size:11px;padding:5px 9px;flex-shrink:0;background:var(--brand);color:#fff;border-color:var(--brand)"
-        onclick="toggleProformaPanel('${panelId}','${sie.replace(/'/g,"\\'")}',${idx})">⬇ Proforma</button>
     `;
 
-    // Panel desplegable de descarga (oculto por defecto)
-    const panel = document.createElement('div');
-    panel.id = panelId;
-    panel.style.cssText = 'display:none;flex-direction:column;gap:10px;padding:14px 16px;background:var(--surface-2,#f0f4f8);border-top:1px solid var(--border)';
-    panel.innerHTML = `
-      <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:2px">📂 Descargar Proforma para <span style="color:var(--brand)">${sie}</span></div>
-      <div style="display:flex;flex-direction:column;gap:8px">
-        <!-- Proforma Genérico -->
-        <button class="btn btn-primary btn-full" style="font-size:12px;justify-content:flex-start;gap:8px;text-align:left"
-          onclick="descargarProformaGenerico('${sie.replace(/'/g,"\\'")}','pfStatusG_${idx}')">
-          📄 Proforma Genérico &nbsp;<span style="font-size:10px;opacity:.7">(busca "Proforma ${sie}" en FTP)</span>
-        </button>
-        <div id="pfStatusG_${idx}"></div>
-        <!-- Proforma Proyecto -->
-        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:8px">
-          <div style="font-size:12px;font-weight:600;color:var(--text)">📁 Proforma Proyecto</div>
-          <div style="font-size:11px;color:var(--text-muted)">Introduce el número de proyecto para buscar su Proforma específica</div>
-          <input type="text" id="pfPedido_${idx}" class="form-input" placeholder="Nº de proyecto" autocomplete="off"
-            style="font-size:13px;padding:8px 10px"
-            onkeydown="if(event.key==='Enter')descargarProformaProyecto(this.value,'pfStatusP_${idx}')"/>
-          <button class="btn btn-primary btn-full" style="font-size:12px"
-            onclick="descargarProformaProyecto(document.getElementById('pfPedido_${idx}').value,'pfStatusP_${idx}')">
-            ⬇ Buscar y Descargar
-          </button>
-          <div id="pfStatusP_${idx}"></div>
+    // Sub-panel de tipo (visible solo si checked)
+    const tipoPanel = document.createElement('div');
+    tipoPanel.style.cssText = `display:${checked?'flex':'none'};flex-direction:column;gap:8px;padding:10px 16px 12px 44px;background:rgba(13,148,136,.04);border-top:1px solid rgba(13,148,136,.12)`;
+    tipoPanel.innerHTML = `
+      <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px">Tipo de Proforma para ${sie}</div>
+      <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;padding:7px 10px;border-radius:8px;border:1.5px solid ${tipo==='generico'?'#0d9488':'var(--border)'};background:${tipo==='generico'?'rgba(13,148,136,.08)':'var(--surface)'}">
+        <input type="radio" name="pfTipo_${idx}" value="generico" ${tipo==='generico'?'checked':''}
+          style="margin-top:2px;accent-color:#0d9488;flex-shrink:0"
+          onchange="setCfgProformaTipo('${sie.replace(/'/g,"\\'")}','generico',${idx})"/>
+        <div>
+          <div style="font-size:12px;font-weight:700;color:var(--text)">📄 Proforma Genérico</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:1px">Busca el archivo "Proforma ${sie}" en la carpeta Proforma</div>
         </div>
-      </div>
+      </label>
+      <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;padding:7px 10px;border-radius:8px;border:1.5px solid ${tipo==='proyecto'?'#0d9488':'var(--border)'};background:${tipo==='proyecto'?'rgba(13,148,136,.08)':'var(--surface)'}">
+        <input type="radio" name="pfTipo_${idx}" value="proyecto" ${tipo==='proyecto'?'checked':''}
+          style="margin-top:2px;accent-color:#0d9488;flex-shrink:0"
+          onchange="setCfgProformaTipo('${sie.replace(/'/g,"\\'")}','proyecto',${idx})"/>
+        <div>
+          <div style="font-size:12px;font-weight:700;color:var(--text)">📁 Proforma Proyecto</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:1px">Busca en la carpeta Proforma un archivo que empiece por el número de proyecto del pedido</div>
+        </div>
+      </label>
     `;
 
     row.appendChild(header);
-    row.appendChild(panel);
+    row.appendChild(tipoPanel);
     lista.appendChild(row);
   });
 }
 
-// Panel de descarga proforma: toggle visible/oculto
-function toggleProformaPanel(panelId, sie, idx){
-  const panel = document.getElementById(panelId);
-  if(!panel) return;
-  // Cerrar todos los otros paneles abiertos
-  document.querySelectorAll('#cfgSieLista [id^="panel_"]').forEach(p => {
-    if(p.id !== panelId) p.style.display = 'none';
-  });
-  panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
-  if(panel.style.display === 'flex') panel.scrollIntoView({ behavior:'smooth', block:'nearest' });
-}
-
-async function descargarProformaGenerico(sie, statusId){
-  const statusEl = document.getElementById(statusId);
-  if(!statusEl) return;
-  statusEl.innerHTML = '<span style="font-size:11px;color:var(--text-muted)">⏳ Buscando en FTP...</span>';
-  try{
-    const res = await authFetch('/api/doc-proforma/generico?sie='+encodeURIComponent(sie));
-    if(!res.ok){
-      const err = await res.json().catch(()=>({error:'Error desconocido'}));
-      statusEl.innerHTML = `<div class="sbox err" style="font-size:11px;padding:7px 10px">⚠ ${err.error||'No encontrado'}</div>`;
-      return;
-    }
-    const blob = await res.blob();
-    const cd   = res.headers.get('Content-Disposition')||'';
-    const match = cd.match(/filename\*?=(?:UTF-8'')?([^;\r\n]+)/i);
-    const fileName = match ? decodeURIComponent(match[1].replace(/"/g,'')) : `Proforma ${sie}.xlsx`;
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href=url; a.download=fileName; a.click();
-    setTimeout(()=>URL.revokeObjectURL(url), 5000);
-    statusEl.innerHTML = `<div class="sbox ok" style="font-size:11px;padding:7px 10px">✓ Descargado: <b>${fileName}</b></div>`;
-  }catch(e){
-    statusEl.innerHTML = `<div class="sbox err" style="font-size:11px;padding:7px 10px">⚠ ${e.message}</div>`;
-  }
-}
-
-async function descargarProformaProyecto(pedido, statusId){
-  const statusEl = document.getElementById(statusId);
-  if(!statusEl) return;
-  const v = (pedido||'').trim();
-  if(!v){ statusEl.innerHTML = '<div class="sbox err" style="font-size:11px;padding:7px 10px">⚠ Introduce el número de proyecto</div>'; return; }
-  statusEl.innerHTML = '<span style="font-size:11px;color:var(--text-muted)">⏳ Buscando en FTP...</span>';
-  try{
-    const res = await authFetch('/api/doc-proforma/proyecto?pedido='+encodeURIComponent(v));
-    if(!res.ok){
-      const err = await res.json().catch(()=>({error:'Error desconocido'}));
-      statusEl.innerHTML = `<div class="sbox err" style="font-size:11px;padding:7px 10px">⚠ ${err.error||'No encontrado'}</div>`;
-      return;
-    }
-    const blob = await res.blob();
-    const cd   = res.headers.get('Content-Disposition')||'';
-    const match = cd.match(/filename\*?=(?:UTF-8'')?([^;\r\n]+)/i);
-    const fileName = match ? decodeURIComponent(match[1].replace(/"/g,'')) : `Proforma_${v}.xlsx`;
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href=url; a.download=fileName; a.click();
-    setTimeout(()=>URL.revokeObjectURL(url), 5000);
-    statusEl.innerHTML = `<div class="sbox ok" style="font-size:11px;padding:7px 10px">✓ Descargado: <b>${fileName}</b></div>`;
-  }catch(e){
-    statusEl.innerHTML = `<div class="sbox err" style="font-size:11px;padding:7px 10px">⚠ ${e.message}</div>`;
-  }
+function setCfgProformaTipo(sie, tipo, idx){
+  _cfgProformaTipos[sie] = tipo;
+  // Re-render solo la fila afectada actualizando los estilos de las opciones
+  renderCfgSies();
+  document.getElementById('cfgProformaStatus').innerHTML = '';
 }
 
 function toggleCfgSie(sie, checked){
   if(checked){
     if(!_cfgSiesSeleccionados.includes(sie)) _cfgSiesSeleccionados.push(sie);
+    if(!_cfgProformaTipos[sie]) _cfgProformaTipos[sie] = 'generico'; // valor por defecto
   } else {
     _cfgSiesSeleccionados = _cfgSiesSeleccionados.filter(s => s !== sie);
   }
   actualizarContadores();
-  renderCfgSies(); // Re-render para actualizar estilos
+  renderCfgSies();
   document.getElementById('cfgProformaStatus').innerHTML = '';
 }
 
@@ -3657,7 +3600,10 @@ function cfgSelectAll(){
   const visibles = _cfgSiesDisponibles.filter(sie =>
     !_cfgFiltro || sie.toLowerCase().includes(_cfgFiltro)
   );
-  visibles.forEach(sie => { if(!_cfgSiesSeleccionados.includes(sie)) _cfgSiesSeleccionados.push(sie); });
+  visibles.forEach(sie => {
+    if(!_cfgSiesSeleccionados.includes(sie)) _cfgSiesSeleccionados.push(sie);
+    if(!_cfgProformaTipos[sie]) _cfgProformaTipos[sie] = 'generico';
+  });
   actualizarContadores();
   renderCfgSies();
 }
@@ -3678,13 +3624,17 @@ async function guardarConfigProforma(){
   try {
     const res  = await authFetch('/api/config/proforma', {
       method: 'POST',
-      body: JSON.stringify({ proformaSIEs: _cfgSiesSeleccionados }),
+      body: JSON.stringify({
+        proformaSIEs:  _cfgSiesSeleccionados,
+        proformaTipos: _cfgProformaTipos,
+      }),
     });
     const data = await res.json();
     if(!data.success) throw new Error(data.error || 'Error guardando');
 
     // Actualizar la variable global en memoria para efecto inmediato
-    _proformaSIEsActivos = [..._cfgSiesSeleccionados];
+    _proformaSIEsActivos  = [..._cfgSiesSeleccionados];
+    _proformaTiposActivos = Object.assign({}, _cfgProformaTipos);
 
     document.getElementById('cfgProformaStatus').innerHTML =
       `<div class="sbox ok">✓ Configuración guardada correctamente. ${_cfgSiesSeleccionados.length} SIE(s) con Proforma activa.</div>`;
@@ -3720,7 +3670,11 @@ async function cargarProformaMapfre(){
   document.getElementById('proformaError').style.display   = 'none';
   document.getElementById('proformaForm').style.display    = 'none';
   try {
-    const res  = await authFetch(`/api/proforma-mapfre?pedido=${encodeURIComponent(currentPedido)}`);
+    // Determinar tipo de proforma configurado para el SIE del pedido actual
+    const sie  = ((currentDatosExcel || {}).SIE || '').trim();
+    const tipo = (sie && _proformaTiposActivos[sie]) || 'generico';
+    const url  = `/api/proforma-mapfre?pedido=${encodeURIComponent(currentPedido)}&sie=${encodeURIComponent(sie)}&tipo=${encodeURIComponent(tipo)}`;
+    const res  = await authFetch(url);
     const data = await res.json();
     if(!data.success) throw new Error(data.error || 'Error al cargar Proforma');
 
