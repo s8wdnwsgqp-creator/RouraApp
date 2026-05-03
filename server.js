@@ -53,7 +53,8 @@ async function getExcelRows(ftpConfig, basePath, fileName) {
 
 // ── Config ─────────────────────────────────────────────────
 const JWT_SECRET = process.env.JWT_SECRET || 'roura-cevasa-secret-2025';
-const USERS_FILE = path.join(__dirname, 'data', 'users.json');
+const USERS_FILE   = path.join(__dirname, 'data', 'users.json');
+const CONFIG_FILE  = path.join(__dirname, 'data', 'config.json');
 const BASE_PATH  = '/www';
 
 // ── Timestamp en formato yyyymmdd_hhmmss para nombres de archivo ──────────
@@ -108,6 +109,18 @@ function getUsers() {
     saveUsers(users);
   }
   return users;
+}
+
+// ── CONFIG (proforma SIEs, etc.) ─────────────────────────────
+function getConfig() {
+  try {
+    if (!fs.existsSync(CONFIG_FILE)) return { proformaSIEs: [] };
+    return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+  } catch (_) { return { proformaSIEs: [] }; }
+}
+function saveConfig(cfg) {
+  fs.mkdirSync(path.dirname(CONFIG_FILE), { recursive: true });
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2));
 }
 
 // ── Express ─────────────────────────────────────────────────
@@ -2554,6 +2567,50 @@ app.post('/api/guardar-proforma', requireAuth, async (req, res) => {
     res.json({ success: true, fileName: outName });
   } catch (e) {
     console.error('[guardar-proforma] Error:', e.message);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ── CONFIGURACIÓN DOCUMENTACIÓN PROYECTOS ───────────────────────────────────
+
+// GET /api/config/proforma — devuelve la lista de SIEs con Proforma activada
+// Accesible a usuarios internos (no externos)
+app.get('/api/config/proforma', requireAuth, (req, res) => {
+  const cfg = getConfig();
+  res.json({ success: true, proformaSIEs: cfg.proformaSIEs || [] });
+});
+
+// POST /api/config/proforma — guarda la lista de SIEs con Proforma activada
+// Solo internos (admin o user interno); externos no tienen acceso a esta pantalla
+app.post('/api/config/proforma', requireAuth, (req, res) => {
+  const nivelAcceso = (req.user.nivel_acceso || '').toLowerCase().trim();
+  if (nivelAcceso === 'externo') {
+    return res.status(403).json({ success: false, error: 'Sin permisos' });
+  }
+  const { proformaSIEs } = req.body;
+  if (!Array.isArray(proformaSIEs)) {
+    return res.status(400).json({ success: false, error: 'proformaSIEs debe ser un array' });
+  }
+  const cfg = getConfig();
+  cfg.proformaSIEs = proformaSIEs.map(s => String(s).trim()).filter(Boolean);
+  saveConfig(cfg);
+  res.json({ success: true, proformaSIEs: cfg.proformaSIEs });
+});
+
+// GET /api/sies-disponibles — lista SIEs únicos del Excel vw_segplazo (no vacíos)
+// Para poblar el selector de la pantalla de configuración
+app.get('/api/sies-disponibles', requireAuth, async (req, res) => {
+  const EXCEL_FILE = 'vw_segplazo_052025.xlsx';
+  try {
+    const rows = await getExcelRows(FTP_CONFIG, BASE_PATH, EXCEL_FILE);
+    const siesSet = new Set();
+    for (let i = 1; i < rows.length; i++) {
+      const sie = String(rows[i][1] || '').trim();  // Columna B = SIE
+      if (sie) siesSet.add(sie);
+    }
+    const sies = [...siesSet].sort((a, b) => a.localeCompare(b, 'es'));
+    res.json({ success: true, sies });
+  } catch (e) {
     res.status(500).json({ success: false, error: e.message });
   }
 });
