@@ -318,6 +318,22 @@ tr.tdir .nt{color:var(--brand);font-weight:600}
 .dld-btn{opacity:0;background:none;border:1px solid var(--border);color:var(--text-muted);font-family:var(--mono);font-size:10px;padding:3px 8px;border-radius:4px;cursor:pointer;transition:all .12s}
 tr:hover .dld-btn{opacity:1}
 .dld-btn:hover{border-color:var(--brand);color:var(--brand);background:var(--brand-light)}
+.del-btn{opacity:0;background:none;border:1px solid transparent;color:var(--text-muted);font-family:var(--mono);font-size:10px;padding:3px 7px;border-radius:4px;cursor:pointer;transition:all .12s;margin-left:3px}
+tr:hover .del-btn{opacity:1}
+.del-btn:hover{border-color:rgba(229,62,62,.35);color:var(--red);background:var(--red-dim)}
+.exp-actions{display:flex;align-items:center;gap:6px;padding:8px 24px;border-bottom:1px solid var(--border);background:var(--surface);flex-wrap:wrap}
+.exp-upload-bar{display:none;align-items:center;gap:8px;padding:10px 24px;background:var(--brand-light);border-bottom:2px solid rgba(27,108,168,.2);font-size:12px;font-weight:600;color:var(--brand)}
+.exp-upload-bar.show{display:flex}
+.exp-upload-prog{flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden}
+.exp-upload-prog-bar{height:100%;background:linear-gradient(90deg,var(--brand),#2d8cd4);border-radius:3px;transition:width .2s;width:0%}
+/* modal genérico reutilizado para confirmación y nueva carpeta */
+.exp-modal-overlay{display:none;position:fixed;inset:0;background:rgba(10,22,40,.55);z-index:900;align-items:center;justify-content:center;backdrop-filter:blur(3px)}
+.exp-modal-overlay.open{display:flex}
+.exp-modal{background:var(--surface);border-radius:var(--radius-lg);padding:28px;width:100%;max-width:380px;box-shadow:var(--shadow-lg);animation:fadeUp .18s ease}
+.exp-modal h3{font-size:16px;font-weight:800;color:var(--text);margin-bottom:8px}
+.exp-modal p{font-size:13px;color:var(--text-muted);margin-bottom:20px;line-height:1.5}
+.exp-modal .fi{width:100%;margin-bottom:16px}
+.exp-modal-btns{display:flex;gap:8px;justify-content:flex-end}
 .exp-stats{display:flex;align-items:center;gap:16px;padding:8px 24px;border-top:1px solid var(--border);font-size:10px;color:var(--text-muted);background:var(--surface);font-family:var(--mono);font-weight:600}
 .esv{color:var(--text-dim);font-weight:700}
 .exp-loading{display:none;flex-direction:column;align-items:center;justify-content:center;padding:60px;gap:14px}
@@ -794,7 +810,7 @@ tr:hover .dld-btn{opacity:1}
 
 <!-- EXPLORER -->
 <div id="screenExplorer" class="screen">
-  <div class="bc-bar" id="expBc"><span class="bc-item active" onclick="expNavigate('/')">🏠 /www/DMA</span></div>
+  <div class="bc-bar" id="expBc"><span class="bc-item active" onclick="expNavigate('/')">🏠 Raíz</span></div>
   <div class="exp-toolbar">
     <div class="exp-tl">
       <button class="btn" onclick="nav('home')">← Inicio</button>
@@ -804,16 +820,55 @@ tr:hover .dld-btn{opacity:1}
     </div>
     <div class="srch"><span style="color:var(--text-muted);font-size:13px">⌕</span><input type="text" id="expSearch" placeholder="Filtrar archivos..." oninput="expFilter()"/></div>
   </div>
+  <!-- Barra de acciones: subir, nueva carpeta -->
+  <div class="exp-actions">
+    <label class="btn btn-primary" style="cursor:pointer" title="Subir archivo al directorio actual">
+      ⬆ Subir archivo
+      <input type="file" id="expFileInput" multiple style="display:none" onchange="expUploadFiles(this.files)">
+    </label>
+    <button class="btn" onclick="expOpenMkdir()" title="Crear nueva carpeta en el directorio actual">📁 Nueva carpeta</button>
+  </div>
+  <!-- Barra de progreso de subida -->
+  <div class="exp-upload-bar" id="expUploadBar">
+    <span id="expUploadLabel">Subiendo...</span>
+    <div class="exp-upload-prog"><div class="exp-upload-prog-bar" id="expUploadProgBar"></div></div>
+    <span id="expUploadPct">0%</span>
+  </div>
   <div class="exp-loading active" id="expLoading"><div class="spinner"></div><span style="color:var(--text-dim);font-size:13px;font-weight:500">Conectando al servidor FTP...</span></div>
   <div class="exp-empty" id="expEmpty"><span style="font-size:40px;opacity:.25">📁</span><span>Carpeta vacía</span></div>
   <div class="tbl-wrap" id="expTableWrap" style="display:none">
-    <table><thead><tr><th style="width:42%">Nombre</th><th>Tipo</th><th>Tamaño</th><th>Modificado</th><th style="width:70px"></th></tr></thead><tbody id="expTbody"></tbody></table>
+    <table><thead><tr><th style="width:40%">Nombre</th><th>Tipo</th><th>Tamaño</th><th>Modificado</th><th style="width:110px;text-align:right">Acciones</th></tr></thead><tbody id="expTbody"></tbody></table>
   </div>
   <div class="exp-stats" id="expStats" style="display:none">
     <span>Carpetas: <span class="esv" id="expDirs">0</span></span>
     <span>Archivos: <span class="esv" id="expFiles">0</span></span>
     <span>Tamaño: <span class="esv" id="expSize">—</span></span>
     <span style="margin-left:auto">Actualizado: <span class="esv" id="expTime">—</span></span>
+  </div>
+</div>
+
+<!-- Modal: confirmar borrado -->
+<div class="exp-modal-overlay" id="expDeleteModal">
+  <div class="exp-modal">
+    <h3>🗑️ Eliminar elemento</h3>
+    <p id="expDeleteMsg">¿Seguro que deseas eliminar este elemento? Esta acción no se puede deshacer.</p>
+    <div class="exp-modal-btns">
+      <button class="btn" onclick="document.getElementById('expDeleteModal').classList.remove('open')">Cancelar</button>
+      <button class="btn btn-danger" id="expDeleteConfirmBtn" style="font-weight:700">Eliminar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: nueva carpeta -->
+<div class="exp-modal-overlay" id="expMkdirModal">
+  <div class="exp-modal">
+    <h3>📁 Nueva carpeta</h3>
+    <p>Introduce el nombre de la nueva carpeta en <strong id="expMkdirPath">/</strong>:</p>
+    <input type="text" class="fi" id="expMkdirName" placeholder="Nombre de la carpeta" maxlength="80" onkeydown="if(event.key==='Enter')expMkdirConfirm()">
+    <div class="exp-modal-btns">
+      <button class="btn" onclick="document.getElementById('expMkdirModal').classList.remove('open')">Cancelar</button>
+      <button class="btn btn-primary" onclick="expMkdirConfirm()">Crear</button>
+    </div>
   </div>
 </div>
 
@@ -2444,8 +2499,12 @@ function expRender(items){
     const tr=document.createElement('tr');tr.style.animationDelay=`${(i+1)*15}ms`;tr.className=item.type==='directory'?'tdir':'';
     const ico=item.type==='directory'?'📁':getIcon(item.name);const isDir=item.type==='directory';
     const ext=isDir?'DIR':item.name.split('.').pop().toUpperCase().slice(0,6)||'FILE';
-    tr.innerHTML=`<td><div class="nc"><span>${ico}</span><span class="nt">${item.name}</span></div></td><td><span class="tbadge ${isDir?'dir':'file'}">${ext}</span></td><td class="tc">${isDir?'—':fmtSize(item.size)}</td><td class="tc">${fmtDate(item.modifiedAt)}</td><td>${!isDir?`<button class="dld-btn" onclick="expDownload(event,'${expPath}/${item.name}')">↓ Descargar</button>`:''}</td>`;
-    if(isDir)tr.onclick=()=>expNavigate(`${expPath==='/'?'':expPath}/${item.name}`);
+    const itemFullPath=`${expPath==='/'?'':expPath}/${item.name}`;
+    const actBtns=isDir
+      ? `<button class="del-btn" onclick="expAskDelete(event,'${itemFullPath}','${item.name}',true)" title="Eliminar carpeta">🗑</button>`
+      : `<button class="dld-btn" onclick="expDownload(event,'${itemFullPath}')" title="Descargar">↓ Bajar</button><button class="del-btn" onclick="expAskDelete(event,'${itemFullPath}','${item.name}',false)" title="Eliminar archivo">🗑</button>`;
+    tr.innerHTML=`<td><div class="nc"><span>${ico}</span><span class="nt">${item.name}</span></div></td><td><span class="tbadge ${isDir?'dir':'file'}">${ext}</span></td><td class="tc">${isDir?'—':fmtSize(item.size)}</td><td class="tc">${fmtDate(item.modifiedAt)}</td><td style="text-align:right">${actBtns}</td>`;
+    if(isDir)tr.onclick=(e)=>{if(e.target.closest('.del-btn'))return;expNavigate(itemFullPath);};
     tbody.appendChild(tr);
   });
 }
@@ -2455,8 +2514,75 @@ function expRefresh(){expLoad(expPath);}
 function expSort(){const v=document.getElementById('expSort').value;let s=[...expItems];if(v==='name-asc')s.sort((a,b)=>a.name.localeCompare(b.name));else if(v==='name-desc')s.sort((a,b)=>b.name.localeCompare(a.name));else if(v==='size-desc')s.sort((a,b)=>(b.size||0)-(a.size||0));else if(v==='date-desc')s.sort((a,b)=>new Date(b.modifiedAt)-new Date(a.modifiedAt));else if(v==='type')s.sort((a,b)=>a.type.localeCompare(b.type)||a.name.localeCompare(b.name));expRender(s);}
 function expFilter(){const q=document.getElementById('expSearch').value.toLowerCase();expRender(expItems.filter(i=>i.name.toLowerCase().includes(q)));}
 function expDownload(e,p){e.stopPropagation();window.open(`${API}/api/download?path=${encodeURIComponent(p)}&_t=${token}`);}
-function expUpdateBc(path){const bar=document.getElementById('expBc');bar.innerHTML='';const parts=path.split('/').filter(Boolean);const root=document.createElement('span');root.className='bc-item'+(parts.length===0?' active':'');root.textContent='🏠 /www/DMA';root.onclick=()=>{expHistory=[];expNavigate('/');};bar.appendChild(root);let accum='';parts.forEach((p,i)=>{accum+='/'+p;const sep=document.createElement('span');sep.className='bc-sep';sep.textContent=' / ';bar.appendChild(sep);const span=document.createElement('span');span.className='bc-item'+(i===parts.length-1?' active':'');span.textContent=p;const snap=accum;if(i<parts.length-1)span.onclick=()=>expNavigate(snap);bar.appendChild(span);});}
+function expUpdateBc(p){const bar=document.getElementById('expBc');bar.innerHTML='';const parts=p.split('/').filter(Boolean);const root=document.createElement('span');root.className='bc-item'+(parts.length===0?' active':'');root.textContent='🏠 Raíz';root.onclick=()=>{expHistory=[];expNavigate('/');};bar.appendChild(root);let accum='';parts.forEach((pt,i)=>{accum+='/'+pt;const sep=document.createElement('span');sep.className='bc-sep';sep.textContent=' / ';bar.appendChild(sep);const span=document.createElement('span');span.className='bc-item'+(i===parts.length-1?' active':'');span.textContent=pt;const snap=accum;if(i<parts.length-1)span.onclick=()=>expNavigate(snap);bar.appendChild(span);});}
 function expUpdateStats(items){document.getElementById('expDirs').textContent=items.filter(i=>i.type==='directory').length;document.getElementById('expFiles').textContent=items.filter(i=>i.type==='file').length;document.getElementById('expSize').textContent=fmtSize(items.reduce((a,b)=>a+(b.size||0),0));document.getElementById('expTime').textContent=new Date().toLocaleTimeString('es-ES');document.getElementById('expStats').style.display='flex';}
+
+// ── EXPLORADOR: SUBIR archivos ────────────────────────────────
+async function expUploadFiles(files){
+  if(!files||!files.length)return;
+  const bar=document.getElementById('expUploadBar');
+  const progBar=document.getElementById('expUploadProgBar');
+  const label=document.getElementById('expUploadLabel');
+  const pct=document.getElementById('expUploadPct');
+  bar.classList.add('show');
+  let ok=0,fail=0;
+  for(let i=0;i<files.length;i++){
+    const f=files[i];
+    label.textContent=`Subiendo ${i+1}/${files.length}: ${f.name}`;
+    const p=Math.round(((i)/files.length)*100);
+    progBar.style.width=p+'%';pct.textContent=p+'%';
+    try{
+      const fd=new FormData();fd.append('file',f);fd.append('path',expPath);
+      const r=await authFetch('/api/explorer/upload',{method:'POST',body:fd});
+      const d=await r.json();
+      if(d.success)ok++;else{fail++;showToast(`Error subiendo ${f.name}: ${d.error}`,'err');}
+    }catch(e){fail++;showToast(`Error subiendo ${f.name}: ${e.message}`,'err');}
+  }
+  progBar.style.width='100%';pct.textContent='100%';
+  setTimeout(()=>{bar.classList.remove('show');progBar.style.width='0%';},1200);
+  document.getElementById('expFileInput').value='';
+  showToast(fail===0?`✅ ${ok} archivo(s) subido(s) correctamente`:`⚠️ ${ok} OK · ${fail} con error`,fail>0?'err':'ok');
+  expRefresh();
+}
+
+// ── EXPLORADOR: BORRAR ────────────────────────────────────────
+function expAskDelete(e,itemPath,name,isDir){
+  e.stopPropagation();
+  document.getElementById('expDeleteMsg').innerHTML=`¿Seguro que deseas eliminar <strong>${name}</strong>?${isDir?' Se eliminará la carpeta y todo su contenido.':''} Esta acción no se puede deshacer.`;
+  const btn=document.getElementById('expDeleteConfirmBtn');
+  btn.onclick=()=>expDoDelete(itemPath);
+  document.getElementById('expDeleteModal').classList.add('open');
+}
+async function expDoDelete(itemPath){
+  document.getElementById('expDeleteModal').classList.remove('open');
+  try{
+    const r=await authFetch(`/api/explorer/delete?path=${encodeURIComponent(itemPath)}`,{method:'DELETE'});
+    const d=await r.json();
+    if(!d.success)throw new Error(d.error);
+    showToast('✅ Elemento eliminado','ok');
+    expRefresh();
+  }catch(e){showToast('Error: '+e.message,'err');}
+}
+
+// ── EXPLORADOR: NUEVA CARPETA ─────────────────────────────────
+function expOpenMkdir(){
+  document.getElementById('expMkdirPath').textContent=expPath||'/';
+  document.getElementById('expMkdirName').value='';
+  document.getElementById('expMkdirModal').classList.add('open');
+  setTimeout(()=>document.getElementById('expMkdirName').focus(),120);
+}
+async function expMkdirConfirm(){
+  const name=document.getElementById('expMkdirName').value.trim();
+  if(!name){showToast('Introduce un nombre de carpeta','err');return;}
+  document.getElementById('expMkdirModal').classList.remove('open');
+  try{
+    const r=await authFetch('/api/explorer/mkdir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:expPath,name})});
+    const d=await r.json();
+    if(!d.success)throw new Error(d.error);
+    showToast(`✅ Carpeta "${name}" creada`,'ok');
+    expRefresh();
+  }catch(e){showToast('Error: '+e.message,'err');}
+}
 
 // ── HELPERS ──────────────────────────────────────────────────
 function showToast(msg,type='ok'){const t=document.getElementById('toast');t.textContent=msg;t.className=`toast ${type} show`;setTimeout(()=>t.className='toast',3000);}
