@@ -1,65 +1,64 @@
-const ftp = require('basic-ftp');
+/**
+ * test-ftp.js — Diagnóstico de conexión FTP
+ * Ejecutar con: node test-ftp.js
+ */
+const ftp  = require('basic-ftp');
+const XLSX = require('xlsx');
+const { PassThrough } = require('stream');
+
+const EXCEL_FILENAME = 'vw_segplazo_052025.xlsx';
+
+const config = {
+  host:     'app2-roura-cevasa-com.espacioseguro.com',
+  user:     'app2roura-cevasa',
+  password: 'Roura2026$',
+  port:     21,
+  secure:   true,
+  tls:      { rejectUnauthorized: false }
+};
 
 async function testFTP() {
   const client = new ftp.Client(30000);
   client.ftp.verbose = true;
 
-  const config = {
-    host: 'app2-roura-cevasa-com.espacioseguro.com',
-    user: 'app2roura-cevasa',
-    password: 'Roura2026$',
-    port: 21,
-    secure: true,
-    tls: { rejectUnauthorized: false }
-  };
-
   try {
-    console.log('🔌 Conectando al servidor FTPS...');
+    console.log('\n🔌 Conectando...');
     await client.access(config);
-    console.log('✅ Conexión exitosa');
+    console.log('✅ Conexión OK');
 
     const pwd = await client.pwd();
-    console.log('📁 Directorio inicial (pwd):', pwd);
+    console.log('📁 Directorio actual tras conectar:', pwd);
 
-    // Detectar raíz real (mismo algoritmo que ftpConnect en server.js)
-    let basePath;
-    try {
-      await client.cd('/www');
-      basePath = '/www';
-      console.log('✅ cd(/www) exitoso → BASE_PATH = /www');
-    } catch (e) {
-      basePath = '/';
-      console.log('⚠️  cd(/www) falló → BASE_PATH = / (chroot ya en /www)');
+    console.log('\n📂 Listado del directorio actual:');
+    const list = await client.list();
+    if (list.length === 0) {
+      console.log('  ⚠️  Lista vacía (posible problema de formato MLSD/LIST)');
+    } else {
+      list.forEach(f => console.log(`  ${f.type === 2 ? '📁' : '📄'} ${f.name}`));
     }
 
-    // Volver a raíz y listar
-    await client.cd('/');
-    console.log('\n📂 Contenido de la raíz (/):');
-    const rootList = await client.list();
-    rootList.forEach(item => {
-      console.log(`  ${item.type === 2 ? '📁' : '📄'} ${item.name}`);
-    });
+    console.log(`\n⬇️  Intentando descargar ${EXCEL_FILENAME} directamente...`);
+    const pt = new PassThrough();
+    const chunks = [];
+    pt.on('data', c => chunks.push(c));
+    const done = new Promise((ok, fail) => { pt.on('end', ok); pt.on('error', fail); });
+    await client.downloadTo(pt, EXCEL_FILENAME);
+    await done;
+    const buffer = Buffer.concat(chunks);
+    console.log(`✅ Descargado: ${buffer.length} bytes`);
 
-    // Entrar en basePath y listar
-    console.log(`\n📂 Contenido de ${basePath}:`);
-    await client.cd(basePath);
-    const baseList = await client.list();
-    baseList.forEach(item => {
-      console.log(`  ${item.type === 2 ? '📁' : '📄'} ${item.name}`);
-    });
-
-    // Verificar archivo Excel
-    console.log('\n🔍 Buscando archivo Excel (.xlsx) en', basePath + ':');
-    const excelFiles = baseList.filter(f => f.name.endsWith('.xlsx'));
-    if (excelFiles.length > 0) {
-      console.log('📊 Archivos Excel encontrados:');
-      excelFiles.forEach(f => console.log(`  - ${f.name}`));
+    const wb = XLSX.read(buffer, { type: 'buffer' });
+    console.log('📊 Hojas del libro:', wb.SheetNames.join(', '));
+    const sheet = wb.Sheets['DatosX3'];
+    if (sheet) {
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+      console.log(`✅ Hoja DatosX3: ${rows.length} filas`);
     } else {
-      console.log('⚠️  No se encontraron archivos .xlsx en', basePath);
+      console.log('❌ Hoja DatosX3 no encontrada');
     }
 
   } catch (e) {
-    console.error('❌ Error FTP:', e.message);
+    console.error('\n❌ Error:', e.message);
   } finally {
     client.close();
     console.log('\n👋 Conexión cerrada');

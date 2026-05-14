@@ -21,49 +21,55 @@ const { PDFDocument: LibPDFDoc } = require('pdf-lib');
 const EXCEL_CACHE_TTL = 5 * 60 * 1000; // 5 minutos
 let _excelCache = null; // { fileName, rows, ts }
 
+// Nombre exacto del Excel principal (sin _PTIN)
+const EXCEL_FILENAME = 'vw_segplazo_052025.xlsx';
+
+async function downloadExcelBuffer(client, fileName) {
+  // Intenta descargar el archivo con el nombre dado.
+  // basic-ftp: downloadTo(stream, nombreArchivo) usa RETR sobre el directorio actual.
+  const pt = new PassThrough();
+  const chunks = [];
+  pt.on('data', c => chunks.push(c));
+  const done = new Promise((ok, fail) => { pt.on('end', ok); pt.on('error', fail); });
+  await client.downloadTo(pt, fileName);
+  await done;
+  return Buffer.concat(chunks);
+}
+
 async function getExcelRows() {
   const now = Date.now();
   if (_excelCache && (now - _excelCache.ts) < EXCEL_CACHE_TTL) {
     console.log('[excel-cache] HIT —', _excelCache.rows.length, 'filas, edad', Math.round((now - _excelCache.ts) / 1000), 's');
     return _excelCache.rows;
   }
-  console.log('[excel-cache] MISS — buscando Excel en FTP...');
+  console.log('[excel-cache] MISS — descargando', EXCEL_FILENAME, '...');
   const client = new ftp.Client(120000);
-  client.ftp.verbose = false;
+  client.ftp.verbose = true;  // verbose para ver la conversación FTP en los logs
   try {
     await ftpConnect(client);
-    // Al conectar ya estamos en la raíz del chroot (que es /www físico).
-    // Listar directamente sin ningún cd previo.
-    const list = await client.list();
-    console.log('[excel-cache] Archivos en raíz FTP:', list.map(f => f.name).join(', '));
-
-    // Buscar vw_segplazo*.xlsx excluyendo _PTIN
-    const excelFile = list.find(f =>
-      /^vw_segplazo.*\.xlsx$/i.test(f.name) &&
-      !/_ptin/i.test(f.name) &&
-      f.type !== 2
-    );
-    if (!excelFile) {
-      const available = list.map(f => f.name).join(', ');
-      throw new Error('No se encontró vw_segplazo*.xlsx (sin _PTIN). Contenido del directorio: ' + (available || 'vacío'));
+    // Al conectar el usuario ya está en la raíz de su chroot (/www físico).
+    // No se hace ningún cd — descarga directa con el nombre exacto del archivo.
+    let buffer;
+    try {
+      buffer = await downloadExcelBuffer(client, EXCEL_FILENAME);
+    } catch (e) {
+      // Si falla, loguear el directorio para diagnóstico y relanzar
+      console.error('[excel-cache] Error descargando', EXCEL_FILENAME, ':', e.message);
+      try {
+        const list = await client.list();
+        console.error('[excel-cache] Contenido del directorio actual:', list.map(f => f.name).join(', ') || '(vacío)');
+      } catch (_) {}
+      throw new Error('No se pudo descargar ' + EXCEL_FILENAME + ': ' + e.message);
     }
-    console.log('[excel-cache] Descargando:', excelFile.name);
-
-    const pt = new PassThrough();
-    const chunks = [];
-    pt.on('data', c => chunks.push(c));
-    const done = new Promise((ok, fail) => { pt.on('end', ok); pt.on('error', fail); });
-    await client.downloadTo(pt, excelFile.name);
-    await done;
-    const buffer = Buffer.concat(chunks);
     const workbook = XLSX.read(buffer, { type: 'buffer' });
     const sheet = workbook.Sheets['DatosX3'];
-    if (!sheet) throw new Error('No se encontró la hoja DatosX3 en ' + excelFile.name);
+    if (!sheet) throw new Error('No se encontró la hoja DatosX3 en ' + EXCEL_FILENAME);
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-    _excelCache = { fileName: excelFile.name, rows, ts: Date.now() };
-    console.log('[excel-cache] Cargado —', rows.length, 'filas desde', excelFile.name);
+    _excelCache = { fileName: EXCEL_FILENAME, rows, ts: Date.now() };
+    console.log('[excel-cache] Cargado —', rows.length, 'filas desde', EXCEL_FILENAME);
     return rows;
   } finally {
+    client.ftp.verbose = false;
     client.close();
   }
 }
