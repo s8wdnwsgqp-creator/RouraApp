@@ -80,7 +80,7 @@ const FONDO_B64 = fs.existsSync(FONDO_PATH)
 
 const FTP_CONFIG = {
   host:     process.env.FTP_HOST || 'app2-roura-cevasa-com.espacioseguro.com',
-  user:     process.env.FTP_USER || 'ia_rc',
+  user:     process.env.FTP_USER || 'app2roura-cevasa',
   password: process.env.FTP_PASS || 'Roura2026$',
   port:     parseInt(process.env.FTP_PORT) || 21,
   secure:   true,  // FTPS con SSL
@@ -400,6 +400,20 @@ async function ensureDir(client, remotePath) {
   }
 }
 
+/**
+ * Sube un buffer al FTP evitando errores 550/553.
+ * Estrategia: hace cd() al directorio destino y usa solo el nombre de archivo
+ * en el comando STOR, en lugar de pasar la ruta absoluta completa.
+ * Muchos servidores FTP rechazan rutas absolutas en STOR (error 553) o no
+ * tienen permisos de escritura en la ruta de destino (error 550).
+ */
+async function ftpUpload(client, buffer, remoteDirPath, fileName) {
+  await ensureDir(client, remoteDirPath);
+  // ensureDir deja al cliente posicionado en remoteDirPath.
+  // Usamos solo el nombre de archivo para evitar errores 550/553.
+  await client.uploadFrom(Readable.from(buffer), fileName);
+}
+
 // ── FTP ENDPOINTS ────────────────────────────────────────────
 
 // ── Servir logo.js con variables base64 para el frontend ─────────────────
@@ -447,7 +461,7 @@ app.post('/api/upload', requireAuth, upload.single('file'), async (req, res) => 
     const ext_upload = path.extname(req.file.originalname);
     const base_upload = path.basename(req.file.originalname, ext_upload).replace(/[^a-zA-Z0-9_\-.]/g, '_').slice(0, 80);
     const newName = pedido_upload + '_' + ts_upload + '_' + base_upload + ext_upload;
-    await client.uploadFrom(Readable.from(req.file.buffer), path.posix.join(tDir, newName));
+    await ftpUpload(client, req.file.buffer, tDir, newName);
     res.json({ success: true, fileName: newName });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
   finally { client.close(); }
@@ -501,7 +515,7 @@ app.post('/api/upload-batch', requireAuth, upload.array('files', 20), async (req
       try {
         const tDir = path.posix.join(BASE_PATH, dirName);
         await ensureDir(client, tDir);
-        await client.uploadFrom(Readable.from(zipBuffer), path.posix.join(tDir, zipName));
+        await ftpUpload(client, zipBuffer, tDir, zipName);
         uploadedOk = true;
         break;
       } catch (e) {
@@ -523,7 +537,7 @@ app.post('/api/upload-batch', requireAuth, upload.array('files', 20), async (req
           const entry = entries[idx];
           const ext   = path.extname(entry.name) || '.jpg';
           const imgName = `${String(pedido).trim()}_${tsPteCert}_${labelCert}_${String(idx + 1).padStart(3, '0')}${ext}`;
-          await client.uploadFrom(Readable.from(entry.buffer), path.posix.join(dirPteCert, imgName));
+          await ftpUpload(client, entry.buffer, dirPteCert, imgName);
           console.log('[upload-batch] Imagen en Fotografias Pte Certificacion:', imgName);
         }
       } catch (eCert) {
@@ -565,7 +579,7 @@ app.post('/api/albaran', requireAuth, async (req, res) => {
     await ensureDir(client, tDir);
     const tsAlb   = tsNombre(req.user.id || '');
     const pdfName = `${String(pedido).trim()}_${tsAlb}_${albInfo.label}.pdf`;
-    await client.uploadFrom(Readable.from(pdfBuffer), path.posix.join(tDir, pdfName));
+    await ftpUpload(client, pdfBuffer, tDir, pdfName);
 
     // ── Si es albarán final de instalación, generar Certificacion Final Trabajo ──
     if (tipo === 'instalacion') {
@@ -1075,7 +1089,7 @@ app.post('/api/certificacion', requireAuth, async (req, res) => {
     await ensureDir(client, dirCert);
     const tsCert  = tsNombre(req.user.id || '');
     const pdfName = `${String(pedido).trim()}_${tsCert}_Certificacion_Final_Trabajo.pdf`;
-    await client.uploadFrom(Readable.from(pdfBuf), path.posix.join(dirCert, pdfName));
+    await ftpUpload(client, pdfBuf, dirCert, pdfName);
 
     res.json({ success: true, fileName: pdfName, ruta: `${dirCert}/${pdfName}` });
   } catch (e) {
@@ -1146,7 +1160,7 @@ app.post('/api/prefactura', requireAuth, async (req, res) => {
       await ensureDir(client, dirCert);
       const ts      = tsNombre(req.user.id || '');
       const pdfName = `${String(pedido).trim()}_${ts}_Certificacion_Prefactura.pdf`;
-      await client.uploadFrom(Readable.from(pdfBuf), path.posix.join(dirCert, pdfName));
+      await ftpUpload(client, pdfBuf, dirCert, pdfName);
       res.json({ success: true, fileName: pdfName, ruta: `${dirCert}/${pdfName}` });
     } finally {
       client.close();
@@ -1707,13 +1721,13 @@ app.post('/api/cierre-cfo', requireAuth, async (req, res) => {
     await ensureDir(client, dirCierre);
     const tsCierre   = tsNombre(req.user.id || '');
     const pdfName    = `${String(pedido).trim()}_${tsCierre}_Informe_Cierre_Objeciones_CFO.pdf`;
-    await client.uploadFrom(Readable.from(pdfBuf), path.posix.join(dirCierre, pdfName));
+    await ftpUpload(client, pdfBuf, dirCierre, pdfName);
 
     // JSON → /www/DMA/Cierre Objeciones json
     const dirCierreJSON = path.posix.join(BASE_PATH, 'Cierre Objeciones json');
     await ensureDir(client, dirCierreJSON);
     const jsonName   = `${String(pedido).trim()} Informe Cierre Objeciones CFO_${tsCierre}.json`;
-    await client.uploadFrom(Readable.from(jsonBuf), path.posix.join(dirCierreJSON, jsonName));
+    await ftpUpload(client, jsonBuf, dirCierreJSON, jsonName);
 
     // Mover JSON Apertura Objeciones json → Historico Visitas CFO
     const dirHistorico = path.posix.join(BASE_PATH, 'Historico Visitas CFO');
@@ -1726,7 +1740,8 @@ app.post('/api/cierre-cfo', requireAuth, async (req, res) => {
     });
     await client.downloadTo(wMov, srcPath);
     const fileBuf = Buffer.concat(chunksMov);
-    await client.uploadFrom(Readable.from(fileBuf), dstPath);
+    // Usar ftpUpload para evitar errores 550/553: cd al directorio + nombre de archivo
+    await ftpUpload(client, fileBuf, dirHistorico, jsonFileName);
     await client.remove(srcPath);
 
     res.json({ success: true, pdfFile: pdfName, jsonFile: jsonName,
@@ -2003,13 +2018,13 @@ app.post('/api/cfo', requireAuth, async (req, res) => {
     await ensureDir(client, dirPDF);
     const tsCFO   = tsNombre(req.user.id || '');
     const pdfName = `${String(pedido).trim()}_${tsCFO}_Informe_Visita_CFO.pdf`;
-    await client.uploadFrom(Readable.from(pdfBuf), path.posix.join(dirPDF, pdfName));
+    await ftpUpload(client, pdfBuf, dirPDF, pdfName);
 
     // JSON → www/DMA/Apertura Objeciones json
     const dirJSON  = path.posix.join(BASE_PATH, 'Apertura Objeciones json');
     await ensureDir(client, dirJSON);
     const jsonName = `${String(pedido).trim()} Informe Visita CFO_${tsCFO}.json`;
-    await client.uploadFrom(Readable.from(jsonBuf), path.posix.join(dirJSON, jsonName));
+    await ftpUpload(client, jsonBuf, dirJSON, jsonName);
 
     res.json({ success: true, pdfFile: pdfName, jsonFile: jsonName,
       rutaPDF:  `${dirPDF}/${pdfName}`,
@@ -2332,7 +2347,7 @@ app.post('/api/expediciones/fotos', requireAuth, async (req, res) => {
     const zipName   = `${String(pedido).trim()}_${ts}_Fotografias_Expediciones.zip`;
     await client.access(FTP_CONFIG);
     await ensureDir(client, tDir);
-    await client.uploadFrom(Readable.from(zipBuffer), path.posix.join(tDir, zipName));
+    await ftpUpload(client, zipBuffer, tDir, zipName);
     res.json({ success: true, zipFile: zipName, count: entries.length });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
@@ -2383,7 +2398,7 @@ app.post('/api/upload-fotos-b64', requireAuth, async (req, res) => {
     const zipName   = `${String(pedido).trim()}_${ts}_${catInfo.label}.zip`;
     await client.access(FTP_CONFIG);
     await ensureDir(client, tDir);
-    await client.uploadFrom(Readable.from(zipBuffer), path.posix.join(tDir, zipName));
+    await ftpUpload(client, zipBuffer, tDir, zipName);
 
     // Si son fotos de antes o final, subir imágenes individuales a "Fotografias Pte Certificacion"
     if (esFotosCertificacion) {
@@ -2395,7 +2410,7 @@ app.post('/api/upload-fotos-b64', requireAuth, async (req, res) => {
           const entry = entries[idx];
           const ext   = path.extname(entry.name) || '.jpg';
           const imgName = `${String(pedido).trim()}_${tsPteCert}_${labelCert}_${String(idx + 1).padStart(3, '0')}${ext}`;
-          await client.uploadFrom(Readable.from(entry.buffer), path.posix.join(dirPteCert, imgName));
+          await ftpUpload(client, entry.buffer, dirPteCert, imgName);
           console.log('[upload-fotos-b64] Imagen en Fotografias Pte Certificacion:', imgName);
         }
       } catch (eCert) {
@@ -2433,7 +2448,7 @@ app.post('/api/inspecciones-seguridad/fotos', requireAuth, upload.array('files',
     const zipName   = `${String(pedido).trim()}_${ts}_Fotografias_Inspeccion_Seguridad.zip`;
     await client.access(FTP_CONFIG);
     await ensureDir(client, tDir);
-    await client.uploadFrom(Readable.from(zipBuffer), path.posix.join(tDir, zipName));
+    await ftpUpload(client, zipBuffer, tDir, zipName);
     res.json({ success: true, zipFile: zipName, count: entries.length });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
@@ -2645,7 +2660,7 @@ app.post('/api/guardar-proforma', requireAuth, async (req, res) => {
     try {
       await client.access(FTP_CONFIG);
       await ensureDir(client, dirDest);
-      await client.uploadFrom(Readable.from(outBuf), path.posix.join(dirDest, outName));
+      await ftpUpload(client, outBuf, dirDest, outName);
     } finally {
       client.close();
     }
