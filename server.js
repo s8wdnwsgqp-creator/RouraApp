@@ -416,7 +416,7 @@ function crearZipBuffer(entries) {
  * Usar en lugar de client.access(FTP_CONFIG) en todos los endpoints.
  */
 async function ftpConnect(client) {
-  await ftpConnect(client);
+  await client.access(FTP_CONFIG);
   const pwd = await client.pwd();
   // Si la raíz del servidor es ya el directorio de trabajo (chroot en /www),
   // /www no existirá como subdirectorio — usamos '/' como base.
