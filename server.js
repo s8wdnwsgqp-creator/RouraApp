@@ -32,11 +32,13 @@ async function getExcelRows(ftpConfig, basePath, fileName) {
   client.ftp.verbose = false;
   try {
     await client.access(ftpConfig);
+    // cd al directorio antes de descargar para evitar error 550 con ruta absoluta
+    await client.cd(basePath);
     const pt = new PassThrough();
     const chunks = [];
     pt.on('data', c => chunks.push(c));
     const done = new Promise((ok, fail) => { pt.on('end', ok); pt.on('error', fail); });
-    await client.downloadTo(pt, path.posix.join(basePath, fileName));
+    await client.downloadTo(pt, fileName);
     await done;
     const buffer = Buffer.concat(chunks);
     const workbook = XLSX.read(buffer, { type: 'buffer' });
@@ -443,8 +445,10 @@ app.get('/api/download', requireAuth, async (req, res) => {
   const client = new ftp.Client(30000); client.ftp.verbose = false;
   try {
     await client.access(FTP_CONFIG);
+    // cd al directorio para evitar error 550 con ruta absoluta
+    await client.cd(path.posix.join(BASE_PATH, path.posix.dirname(filePath)));
     res.setHeader('Content-Disposition', `attachment; filename="${path.basename(filePath)}"`);
-    await client.downloadTo(res, path.posix.join(BASE_PATH, filePath));
+    await client.downloadTo(res, path.posix.basename(filePath));
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
   finally { client.close(); }
 });
@@ -983,12 +987,16 @@ app.post('/api/admin/invalidar-cache-excel', requireAdmin, (req, res) => {
 
 
 // ── HELPER: descargar archivo FTP a Buffer ────────────────────
+// Usa cd() al directorio + nombre de archivo para evitar error 550 con rutas absolutas.
 async function ftpDownloadBuffer(client, remotePath) {
+  const remoteDir  = path.posix.dirname(remotePath);
+  const remoteFile = path.posix.basename(remotePath);
+  await client.cd(remoteDir);
   const pt = new PassThrough();
   const chunks = [];
   pt.on('data', c => chunks.push(c));
   const done = new Promise((res, rej) => { pt.on('end', res); pt.on('error', rej); });
-  await client.downloadTo(pt, remotePath);
+  await client.downloadTo(pt, remoteFile);
   await done;
   return Buffer.concat(chunks);
 }
@@ -1654,12 +1662,13 @@ app.get('/api/cfo-cargar-json', requireAuth, async (req, res) => {
   client.ftp.verbose = false;
   try {
     await client.access(FTP_CONFIG);
-    const remotePath = path.posix.join(BASE_PATH, 'Apertura Objeciones json', nombre);
+    // cd al directorio para evitar error 550 con ruta absoluta
+    await client.cd(path.posix.join(BASE_PATH, 'Apertura Objeciones json'));
     const chunks = [];
     const writable = new (require('stream').Writable)({
       write(chunk, _enc, cb) { chunks.push(chunk); cb(); }
     });
-    await client.downloadTo(writable, remotePath);
+    await client.downloadTo(writable, nombre);
     const jsonStr = Buffer.concat(chunks).toString('utf8');
     const jsonData = JSON.parse(jsonStr);
     res.json({ success: true, json: jsonData });
@@ -1738,7 +1747,9 @@ app.post('/api/cierre-cfo', requireAuth, async (req, res) => {
     const wMov = new (require('stream').Writable)({
       write(chunk, _enc, cb) { chunksMov.push(chunk); cb(); }
     });
-    await client.downloadTo(wMov, srcPath);
+    // cd al dir origen para evitar error 550 con ruta absoluta
+    await client.cd(path.posix.join(BASE_PATH, 'Apertura Objeciones json'));
+    await client.downloadTo(wMov, jsonFileName);
     const fileBuf = Buffer.concat(chunksMov);
     // Usar ftpUpload para evitar errores 550/553: cd al directorio + nombre de archivo
     await ftpUpload(client, fileBuf, dirHistorico, jsonFileName);
@@ -2479,7 +2490,9 @@ app.get('/api/doc-proforma/generico', requireAuth, async (req, res) => {
     }
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(entry.name)}`);
     res.setHeader('Content-Type', 'application/octet-stream');
-    await client.downloadTo(res, path.posix.join(DIR_PROFORMA, entry.name));
+    // cd al directorio para evitar error 550 con ruta absoluta
+    await client.cd(DIR_PROFORMA);
+    await client.downloadTo(res, entry.name);
   } catch (e) {
     console.error('[doc-proforma/generico] Error:', e.message);
     if (!res.headersSent) res.status(500).json({ success: false, error: e.message });
@@ -2507,7 +2520,8 @@ app.get('/api/doc-proforma/proyecto', requireAuth, async (req, res) => {
     }
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(entry.name)}`);
     res.setHeader('Content-Type', 'application/octet-stream');
-    await client.downloadTo(res, path.posix.join(DIR_PROFORMA, entry.name));
+    await client.cd(DIR_PROFORMA);
+    await client.downloadTo(res, entry.name);
   } catch (e) {
     console.error('[doc-proforma/proyecto] Error:', e.message);
     if (!res.headersSent) res.status(500).json({ success: false, error: e.message });
@@ -2566,7 +2580,8 @@ app.get('/api/proforma-mapfre', requireAuth, async (req, res) => {
     const pt = new PassThrough(); const chunks = [];
     pt.on('data', c => chunks.push(c));
     const done = new Promise((ok, fail) => { pt.on('end', ok); pt.on('error', fail); });
-    await client.downloadTo(pt, path.posix.join(DIR_PROFORMA, entry.name));
+    await client.cd(DIR_PROFORMA);
+    await client.downloadTo(pt, entry.name);
     await done;
     const buffer = Buffer.concat(chunks);
 
@@ -2744,10 +2759,10 @@ app.get('/api/doc-obra/pic', requireAuth, async (req, res) => {
     if (!entry) {
       return res.status(404).json({ success: false, error: `No se encontró ningún PIC que empiece por "${pedido}" en la carpeta PIC del servidor.` });
     }
-    const remotePath = path.posix.join(DIR_PIC, entry.name);
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(entry.name)}"`);
     res.setHeader('Content-Type', 'application/octet-stream');
-    await client.downloadTo(res, remotePath);
+    // ftpListSafe ya hizo cd a DIR_PIC — descargamos solo con el nombre
+    await client.downloadTo(res, entry.name);
   } catch (e) {
     console.error('[doc-obra/pic] Error:', e.message);
     if (!res.headersSent) res.status(500).json({ success: false, error: e.message });
@@ -2782,10 +2797,10 @@ app.get('/api/doc-obra/plan-medidas', requireAuth, async (req, res) => {
     if (!entry) {
       return res.status(404).json({ success: false, error: `No se encontró el plan "${tipo}" en la carpeta "Plan Medidas Preventivas" del servidor.` });
     }
-    const remotePath = path.posix.join(DIR_PLAN, entry.name);
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(entry.name)}"`);
     res.setHeader('Content-Type', 'application/octet-stream');
-    await client.downloadTo(res, remotePath);
+    // ftpListSafe ya hizo cd a DIR_PLAN — descargamos solo con el nombre
+    await client.downloadTo(res, entry.name);
   } catch (e) {
     console.error('[doc-obra/plan-medidas] Error:', e.message);
     if (!res.headersSent) res.status(500).json({ success: false, error: e.message });
