@@ -21,7 +21,7 @@ const { PDFDocument: LibPDFDoc } = require('pdf-lib');
 const EXCEL_CACHE_TTL = 5 * 60 * 1000; // 5 minutos
 let _excelCache = null; // { fileName, rows, ts }
 
-async function getExcelRows(ftpConfig, basePath, fileName) {
+async function getExcelRows(ftpConfig, _basePath, fileName) {  // _basePath ignorado: se usa BASE_PATH dinámico
   const now = Date.now();
   if (_excelCache && _excelCache.fileName === fileName && (now - _excelCache.ts) < EXCEL_CACHE_TTL) {
     console.log('[excel-cache] HIT —', _excelCache.rows.length, 'filas, edad', Math.round((now - _excelCache.ts) / 1000), 's');
@@ -31,9 +31,9 @@ async function getExcelRows(ftpConfig, basePath, fileName) {
   const client = new ftp.Client(120000);
   client.ftp.verbose = false;
   try {
-    await client.access(ftpConfig);
-    // cd al directorio antes de descargar para evitar error 550 con ruta absoluta
-    await client.cd(basePath);
+    await ftpConnect(client);
+    // Tras ftpConnect, BASE_PATH es correcto. Ir al directorio y descargar solo con nombre.
+    await client.cd(BASE_PATH);
     const pt = new PassThrough();
     const chunks = [];
     pt.on('data', c => chunks.push(c));
@@ -57,7 +57,36 @@ async function getExcelRows(ftpConfig, basePath, fileName) {
 const JWT_SECRET = process.env.JWT_SECRET || 'roura-cevasa-secret-2025';
 const USERS_FILE   = path.join(__dirname, 'data', 'users.json');
 const CONFIG_FILE  = path.join(__dirname, 'data', 'config.json');
-const BASE_PATH  = '/www';
+// BASE_PATH se detecta automáticamente al conectar al FTP.
+// Algunos usuarios FTP tienen chroot en /www (raíz = /www, archivos en /)
+// y otros tienen chroot en / (archivos en /www).
+// resolveFtpBasePath() prueba las dos posibilidades y devuelve la correcta.
+let _ftpBasePath = null;
+
+async function resolveFtpBasePath(client) {
+  // 1. Intentar entrar en /www desde la raíz actual
+  try {
+    await client.cd('/www');
+    return '/www';
+  } catch (_) {}
+  // 2. Si falla, asumir que ya estamos en /www (chroot)
+  try {
+    await client.cd('/');
+    return '/';
+  } catch (_) {}
+  return '/';
+}
+
+async function getBasePath(client) {
+  if (_ftpBasePath !== null) return _ftpBasePath;
+  _ftpBasePath = await resolveFtpBasePath(client);
+  console.log('[ftp] BASE_PATH detectado:', _ftpBasePath);
+  return _ftpBasePath;
+}
+
+// Alias para compatibilidad con el código existente
+// (se sobreescribe en tiempo de ejecución con el valor real)
+let BASE_PATH = process.env.FTP_BASE_PATH || '/www';
 
 // ── Timestamp en formato yyyymmdd_hhmmss para nombres de archivo ──────────
 function tsNombre(userId) {
@@ -370,33 +399,74 @@ function crearZipBuffer(entries) {
 }
 
 // ── FTP HELPERS ─────────────────────────────────────────────
-async function ensureDir(client, remotePath) {
-  // Try direct cd first
-  try { await client.cd(remotePath); return; } catch (_) {}
+//
+// DISEÑO ANTI-550/553:
+// Los errores 550 y 553 ocurren cuando se pasa una ruta absoluta al servidor
+// FTP en los comandos STOR/RETR/MKD. Algunos servidores solo aceptan el nombre
+// de archivo cuando el cliente ya está posicionado en el directorio correcto.
+// Todos los helpers usan: cd(directorio) → operación(solo_nombre_archivo)
+//
+// DETECCIÓN AUTOMÁTICA DE RAÍZ:
+// Con el usuario ia_rc el chroot era /www (el usuario veía / pero era /www físico).
+// Con app2roura-cevasa la raíz puede ser / o /www según la configuración del servidor.
+// ftpConnect() detecta la raíz real y actualiza BASE_PATH globalmente.
 
-  // Build path segment by segment
-  const parts = remotePath.replace(/^\/+/, '').split('/').filter(Boolean);
-  let current = '';
-  for (const part of parts) {
-    current += '/' + part;
+/**
+ * Conecta al FTP, detecta la raíz real y actualiza BASE_PATH.
+ * Usar en lugar de client.access(FTP_CONFIG) en todos los endpoints.
+ */
+async function ftpConnect(client) {
+  await ftpConnect(client);
+  const pwd = await client.pwd();
+  // Si la raíz del servidor es ya el directorio de trabajo (chroot en /www),
+  // /www no existirá como subdirectorio — usamos '/' como base.
+  // Si /www existe como subdirectorio, lo usamos como base.
+  if (_ftpBasePath === null) {
     try {
-      await client.cd(current);
+      await client.cd('/www');
+      _ftpBasePath = '/www';
     } catch (_) {
-      // Directory doesn't exist — create it
+      _ftpBasePath = '/';
+    }
+    // Volver a la raíz tras la detección
+    try { await client.cd('/'); } catch (_) {}
+    console.log('[ftp] Raíz detectada:', _ftpBasePath, '(pwd inicial:', pwd + ')');
+    BASE_PATH = _ftpBasePath;
+  }
+}
+
+/**
+ * Navega al directorio remotePath creando los segmentos que no existan.
+ * Usa rutas relativas segmento a segmento para evitar errores 550/553 con MKD.
+ */
+async function ensureDir(client, remotePath) {
+  // Normalizar: quitar trailing slashes, vacíos
+  const norm = remotePath.replace(/\/*$/, '') || '/';
+  // Intento directo primero (caso feliz)
+  try { await client.cd(norm); return; } catch (_) {}
+
+  // Construir segmento a segmento desde la raíz
+  const parts = norm.replace(/^\/+/, '').split('/').filter(Boolean);
+  // Volver a la raíz absoluta antes de recorrer
+  await client.cd('/');
+  for (const part of parts) {
+    try {
+      await client.cd(part);
+    } catch (_) {
+      // El directorio no existe — crearlo con nombre relativo (evita 550/553)
       try {
-        await client.send('MKD ' + current);
+        await client.send('MKD ' + part);
       } catch (mkdErr) {
-        // 550 = already exists (race condition), 521 = already exists on some servers
         const msg = mkdErr.message || '';
+        // 550/521 = ya existe (condición de carrera) → ignorar
         if (!msg.includes('550') && !msg.includes('521') && !msg.includes('File exists')) {
-          throw new Error('MKD failed for ' + current + ': ' + msg);
+          throw new Error('MKD falló para "' + part + '": ' + msg);
         }
       }
-      // Now try cd again after mkdir
       try {
-        await client.cd(current);
+        await client.cd(part);
       } catch (cdErr) {
-        throw new Error('Cannot enter ' + current + ': ' + cdErr.message);
+        throw new Error('No se puede entrar en "' + part + '": ' + cdErr.message);
       }
     }
   }
@@ -404,16 +474,28 @@ async function ensureDir(client, remotePath) {
 
 /**
  * Sube un buffer al FTP evitando errores 550/553.
- * Estrategia: hace cd() al directorio destino y usa solo el nombre de archivo
- * en el comando STOR, en lugar de pasar la ruta absoluta completa.
- * Muchos servidores FTP rechazan rutas absolutas en STOR (error 553) o no
- * tienen permisos de escritura en la ruta de destino (error 550).
+ * Hace cd() al directorio y usa solo el nombre de archivo en STOR.
  */
 async function ftpUpload(client, buffer, remoteDirPath, fileName) {
   await ensureDir(client, remoteDirPath);
-  // ensureDir deja al cliente posicionado en remoteDirPath.
-  // Usamos solo el nombre de archivo para evitar errores 550/553.
   await client.uploadFrom(Readable.from(buffer), fileName);
+}
+
+/**
+ * Descarga un archivo FTP a Buffer evitando errores 550.
+ * Hace cd() al directorio y usa solo el nombre de archivo en RETR.
+ */
+async function ftpDownloadBuffer(client, remotePath) {
+  const remoteDir  = path.posix.dirname(remotePath);
+  const remoteFile = path.posix.basename(remotePath);
+  await client.cd(remoteDir);
+  const pt = new PassThrough();
+  const chunks = [];
+  pt.on('data', c => chunks.push(c));
+  const done = new Promise((res, rej) => { pt.on('end', res); pt.on('error', rej); });
+  await client.downloadTo(pt, remoteFile);
+  await done;
+  return Buffer.concat(chunks);
 }
 
 // ── FTP ENDPOINTS ────────────────────────────────────────────
@@ -431,7 +513,7 @@ app.get('/api/list', requireAuth, async (req, res) => {
   const dirPath = req.query.path || '/';
   const client = new ftp.Client(30000); client.ftp.verbose = false;
   try {
-    await client.access(FTP_CONFIG);
+    await ftpConnect(client);
     await client.cd(dirPath === '/' ? BASE_PATH : path.posix.join(BASE_PATH, dirPath));
     const list = await client.list();
     res.json({ success: true, path: dirPath, items: list.map(i => ({ name: i.name, type: i.type === 2 ? 'directory' : 'file', size: i.size, modifiedAt: i.modifiedAt })) });
@@ -444,7 +526,7 @@ app.get('/api/download', requireAuth, async (req, res) => {
   if (!filePath) return res.status(400).json({ error: 'Falta path' });
   const client = new ftp.Client(30000); client.ftp.verbose = false;
   try {
-    await client.access(FTP_CONFIG);
+    await ftpConnect(client);
     // cd al directorio para evitar error 550 con ruta absoluta
     await client.cd(path.posix.join(BASE_PATH, path.posix.dirname(filePath)));
     res.setHeader('Content-Disposition', `attachment; filename="${path.basename(filePath)}"`);
@@ -457,7 +539,7 @@ app.post('/api/upload', requireAuth, upload.single('file'), async (req, res) => 
   if (!req.file) return res.status(400).json({ success: false, error: 'Sin archivo' });
   const client = new ftp.Client(60000); client.ftp.verbose = false;
   try {
-    await client.access(FTP_CONFIG);
+    await ftpConnect(client);
     const tDir = req.body.path === '/' ? BASE_PATH : path.posix.join(BASE_PATH, req.body.path || '/');
     await ensureDir(client, tDir);
     const pedido_upload = (req.body.pedido || '0').toString().trim();
@@ -510,7 +592,7 @@ app.post('/api/upload-batch', requireAuth, upload.array('files', 20), async (req
     const zipName    = `${String(pedido).trim()}_${ts}_${catInfo.label}.zip`;
 
     // ── Subir el ZIP al FTP probando variantes de directorio ─
-    await client.access(FTP_CONFIG);
+    await ftpConnect(client);
 
     // Intentar cada variante del nombre de directorio hasta que una funcione
     let uploadedOk = false;
@@ -573,7 +655,7 @@ app.post('/api/albaran', requireAuth, async (req, res) => {
 
   const client = new ftp.Client(300000); client.ftp.verbose = false;
   try {
-    await client.access(FTP_CONFIG);
+    await ftpConnect(client);
     const albDirMap = {
       'medicion':    { dir: 'Albaranes TD',            label: 'Albaran Medicion' },
       'instalacion': { dir: 'Albaranes Final Trabajo',  label: 'Albaran Final Trabajo' },
@@ -594,7 +676,7 @@ app.post('/api/albaran', requireAuth, async (req, res) => {
       const clientCert = new ftp.Client(300000);
       clientCert.ftp.verbose = false;
       try {
-        await clientCert.access(FTP_CONFIG);
+        await ftpConnect(clientCert);
 
         const DIR_BASE      = BASE_PATH;                                              // /www
         const DIR_PTE_CERT  = 'Fotografias Pte Certificacion';                       // relativo a BASE_PATH
@@ -986,25 +1068,13 @@ app.post('/api/admin/invalidar-cache-excel', requireAdmin, (req, res) => {
 
 
 
-// ── HELPER: descargar archivo FTP a Buffer ────────────────────
-// Usa cd() al directorio + nombre de archivo para evitar error 550 con rutas absolutas.
-async function ftpDownloadBuffer(client, remotePath) {
-  const remoteDir  = path.posix.dirname(remotePath);
-  const remoteFile = path.posix.basename(remotePath);
-  await client.cd(remoteDir);
-  const pt = new PassThrough();
-  const chunks = [];
-  pt.on('data', c => chunks.push(c));
-  const done = new Promise((res, rej) => { pt.on('end', res); pt.on('error', rej); });
-  await client.downloadTo(pt, remoteFile);
-  await done;
-  return Buffer.concat(chunks);
-}
+// ftpDownloadBuffer definido en FTP HELPERS arriba
 
 // ── HELPER: listar archivos de una carpeta FTP (sin error si no existe) ──
 async function ftpListSafe(client, remotePath) {
   try {
-    await client.cd(remotePath);
+    // Usar ensureDir para navegar al directorio de forma robusta
+    await ensureDir(client, remotePath);
     return await client.list();
   } catch (_) { return []; }
 }
@@ -1032,7 +1102,7 @@ app.post('/api/certificacion', requireAuth, async (req, res) => {
   client.ftp.verbose = false;
 
   try {
-    await client.access(FTP_CONFIG);
+    await ftpConnect(client);
 
     // ── Descargar fotos antes ──────────────────────────────
     const listAntes = await ftpListSafe(client, dirAntes);
@@ -1164,7 +1234,7 @@ app.post('/api/prefactura', requireAuth, async (req, res) => {
     const client  = new ftp.Client(300000);
     client.ftp.verbose = false;
     try {
-      await client.access(FTP_CONFIG);
+      await ftpConnect(client);
       await ensureDir(client, dirCert);
       const ts      = tsNombre(req.user.id || '');
       const pdfName = `${String(pedido).trim()}_${ts}_Certificacion_Prefactura.pdf`;
@@ -1637,7 +1707,7 @@ app.get('/api/cfo-listar-pendientes', requireAuth, async (req, res) => {
   const client = new ftp.Client(60000);
   client.ftp.verbose = false;
   try {
-    await client.access(FTP_CONFIG);
+    await ftpConnect(client);
     const dirVisita = path.posix.join(BASE_PATH, 'Apertura Objeciones json');
     await ensureDir(client, dirVisita);
     const lista = await client.list(dirVisita);
@@ -1661,7 +1731,7 @@ app.get('/api/cfo-cargar-json', requireAuth, async (req, res) => {
   const client = new ftp.Client(120000);
   client.ftp.verbose = false;
   try {
-    await client.access(FTP_CONFIG);
+    await ftpConnect(client);
     // cd al directorio para evitar error 550 con ruta absoluta
     await client.cd(path.posix.join(BASE_PATH, 'Apertura Objeciones json'));
     const chunks = [];
@@ -1723,7 +1793,7 @@ app.post('/api/cierre-cfo', requireAuth, async (req, res) => {
   const client = new ftp.Client(300000);
   client.ftp.verbose = false;
   try {
-    await client.access(FTP_CONFIG);
+    await ftpConnect(client);
 
     // PDF → /www/DMA/Cierre Objeciones
     const dirCierre  = path.posix.join(BASE_PATH, 'Cierre Objeciones');
@@ -2022,7 +2092,7 @@ app.post('/api/cfo', requireAuth, async (req, res) => {
   const client = new ftp.Client(300000);
   client.ftp.verbose = false;
   try {
-    await client.access(FTP_CONFIG);
+    await ftpConnect(client);
 
     // PDF → www/DMA/Apertura Objeciones  (PDF directo)
     const dirPDF  = path.posix.join(BASE_PATH, 'Apertura Objeciones');
@@ -2356,7 +2426,7 @@ app.post('/api/expediciones/fotos', requireAuth, async (req, res) => {
     const zipBuffer = await crearZipBuffer(entries);
     const ts        = tsNombre(req.user.id || '');
     const zipName   = `${String(pedido).trim()}_${ts}_Fotografias_Expediciones.zip`;
-    await client.access(FTP_CONFIG);
+    await ftpConnect(client);
     await ensureDir(client, tDir);
     await ftpUpload(client, zipBuffer, tDir, zipName);
     res.json({ success: true, zipFile: zipName, count: entries.length });
@@ -2407,7 +2477,7 @@ app.post('/api/upload-fotos-b64', requireAuth, async (req, res) => {
     const zipBuffer = await crearZipBuffer(entries);
     const ts        = tsNombre(req.user.id || '');
     const zipName   = `${String(pedido).trim()}_${ts}_${catInfo.label}.zip`;
-    await client.access(FTP_CONFIG);
+    await ftpConnect(client);
     await ensureDir(client, tDir);
     await ftpUpload(client, zipBuffer, tDir, zipName);
 
@@ -2457,7 +2527,7 @@ app.post('/api/inspecciones-seguridad/fotos', requireAuth, upload.array('files',
     const zipBuffer = await crearZipBuffer(entries);
     const ts        = tsNombre(req.user.id || '');
     const zipName   = `${String(pedido).trim()}_${ts}_Fotografias_Inspeccion_Seguridad.zip`;
-    await client.access(FTP_CONFIG);
+    await ftpConnect(client);
     await ensureDir(client, tDir);
     await ftpUpload(client, zipBuffer, tDir, zipName);
     res.json({ success: true, zipFile: zipName, count: entries.length });
@@ -2479,7 +2549,7 @@ app.get('/api/doc-proforma/generico', requireAuth, async (req, res) => {
   const client = new ftp.Client(120000);
   client.ftp.verbose = false;
   try {
-    await client.access(FTP_CONFIG);
+    await ftpConnect(client);
     const list = await ftpListSafe(client, DIR_PROFORMA);
     // Nombre empieza por "Proforma " + SIE (insensible a mayúsculas)
     const escaped = sie.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -2512,7 +2582,7 @@ app.get('/api/doc-proforma/proyecto', requireAuth, async (req, res) => {
   const client = new ftp.Client(120000);
   client.ftp.verbose = false;
   try {
-    await client.access(FTP_CONFIG);
+    await ftpConnect(client);
     const list = await ftpListSafe(client, DIR_PROFORMA);
     const entry = list.find(f => f.name.toLowerCase().startsWith(pedido.toLowerCase()) && f.type !== 2);
     if (!entry) {
@@ -2545,7 +2615,7 @@ app.get('/api/proforma-mapfre', requireAuth, async (req, res) => {
   const client = new ftp.Client(120000);
   client.ftp.verbose = false;
   try {
-    await client.access(FTP_CONFIG);
+    await ftpConnect(client);
     await ensureDir(client, DIR_PROFORMA);
 
     const list = await ftpListSafe(client, DIR_PROFORMA);
@@ -2673,7 +2743,7 @@ app.post('/api/guardar-proforma', requireAuth, async (req, res) => {
     const client = new ftp.Client(120000);
     client.ftp.verbose = false;
     try {
-      await client.access(FTP_CONFIG);
+      await ftpConnect(client);
       await ensureDir(client, dirDest);
       await ftpUpload(client, outBuf, dirDest, outName);
     } finally {
@@ -2752,7 +2822,7 @@ app.get('/api/doc-obra/pic', requireAuth, async (req, res) => {
   const client  = new ftp.Client(120000);
   client.ftp.verbose = false;
   try {
-    await client.access(FTP_CONFIG);
+    await ftpConnect(client);
     const list = await ftpListSafe(client, DIR_PIC);
     // Buscar archivo cuyo nombre empiece por el número de pedido (insensible a mayúsculas)
     const entry = list.find(f => f.name.toLowerCase().startsWith(pedido.toLowerCase()) && f.type !== 2);
@@ -2791,7 +2861,7 @@ app.get('/api/doc-obra/plan-medidas', requireAuth, async (req, res) => {
   const client   = new ftp.Client(120000);
   client.ftp.verbose = false;
   try {
-    await client.access(FTP_CONFIG);
+    await ftpConnect(client);
     const list = await ftpListSafe(client, DIR_PLAN);
     const entry = list.find(f => patron.test(f.name) && f.type !== 2);
     if (!entry) {
@@ -2822,6 +2892,6 @@ app.listen(PORT, () => {
   getUsers();
   console.log(`✅ FTP Manager v4.2 en puerto ${PORT}`);
   console.log(`👤 Admin: admin / admin123`);
-  console.log(`📁 FTP base: ${BASE_PATH} (FTPS)`);
+  console.log(`📁 FTP base: ${BASE_PATH} (FTPS) — se confirmará en primera conexión`);
   console.log(`🖼  Logo: ${LOGO_B64 ? 'OK' : 'No encontrado (usando fallback)'}`);
 });

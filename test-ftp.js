@@ -18,47 +18,44 @@ async function testFTP() {
     await client.access(config);
     console.log('✅ Conexión exitosa');
 
-    // Ver directorio actual
     const pwd = await client.pwd();
-    console.log('📁 Directorio actual:', pwd);
+    console.log('📁 Directorio inicial (pwd):', pwd);
 
-    // Listar contenido del directorio raíz
-    console.log('\n📂 Contenido del directorio raíz:');
+    // Detectar raíz real (mismo algoritmo que ftpConnect en server.js)
+    let basePath;
+    try {
+      await client.cd('/www');
+      basePath = '/www';
+      console.log('✅ cd(/www) exitoso → BASE_PATH = /www');
+    } catch (e) {
+      basePath = '/';
+      console.log('⚠️  cd(/www) falló → BASE_PATH = / (chroot ya en /www)');
+    }
+
+    // Volver a raíz y listar
+    await client.cd('/');
+    console.log('\n📂 Contenido de la raíz (/):');
     const rootList = await client.list();
     rootList.forEach(item => {
       console.log(`  ${item.type === 2 ? '📁' : '📄'} ${item.name}`);
     });
 
-    // Intentar entrar en /www
-    console.log('\n🔍 Intentando entrar en /www...');
-    try {
-      await client.cd('/www');
-      const wwwPwd = await client.pwd();
-      console.log('✅ Directorio actual:', wwwPwd);
+    // Entrar en basePath y listar
+    console.log(`\n📂 Contenido de ${basePath}:`);
+    await client.cd(basePath);
+    const baseList = await client.list();
+    baseList.forEach(item => {
+      console.log(`  ${item.type === 2 ? '📁' : '📄'} ${item.name}`);
+    });
 
-      const wwwList = await client.list();
-      console.log('📂 Contenido de /www:');
-      wwwList.forEach(item => {
-        console.log(`  ${item.type === 2 ? '📁' : '📄'} ${item.name}`);
-      });
-    } catch (e) {
-      console.log('❌ Error al entrar en /www:', e.message);
-    }
-
-    // Verificar si existe el archivo Excel
-    console.log('\n🔍 Buscando archivo Excel...');
-    try {
-      await client.cd('/www');
-      const list = await client.list();
-      const excelFiles = list.filter(f => f.name.endsWith('.xlsx'));
-      if (excelFiles.length > 0) {
-        console.log('📊 Archivos Excel encontrados:');
-        excelFiles.forEach(f => console.log(`  - ${f.name}`));
-      } else {
-        console.log('⚠️ No se encontraron archivos .xlsx en /www');
-      }
-    } catch (e) {
-      console.log('❌ Error buscando Excel:', e.message);
+    // Verificar archivo Excel
+    console.log('\n🔍 Buscando archivo Excel (.xlsx) en', basePath + ':');
+    const excelFiles = baseList.filter(f => f.name.endsWith('.xlsx'));
+    if (excelFiles.length > 0) {
+      console.log('📊 Archivos Excel encontrados:');
+      excelFiles.forEach(f => console.log(`  - ${f.name}`));
+    } else {
+      console.log('⚠️  No se encontraron archivos .xlsx en', basePath);
     }
 
   } catch (e) {
