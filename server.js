@@ -80,7 +80,7 @@ const FONDO_B64 = fs.existsSync(FONDO_PATH)
 
 const FTP_CONFIG = {
   host:     process.env.FTP_HOST || 'app2-roura-cevasa-com.espacioseguro.com',
-  user:     process.env.FTP_USER || 'app2roura-cevasa',
+  user:     process.env.FTP_USER || 'ia_rc',
   password: process.env.FTP_PASS || 'Roura2026$',
   port:     parseInt(process.env.FTP_PORT) || 21,
   secure:   true,  // FTPS con SSL
