@@ -55,7 +55,7 @@ async function getExcelRows(ftpConfig, basePath, fileName) {
 const JWT_SECRET = process.env.JWT_SECRET || 'roura-cevasa-secret-2025';
 const USERS_FILE   = path.join(__dirname, 'data', 'users.json');
 const CONFIG_FILE  = path.join(__dirname, 'data', 'config.json');
-const BASE_PATH  = '/www';
+const BASE_PATH  = '/www/www';
 
 // ── Timestamp en formato yyyymmdd_hhmmss para nombres de archivo ──────────
 function tsNombre(userId) {
@@ -80,7 +80,7 @@ const FONDO_B64 = fs.existsSync(FONDO_PATH)
 
 const FTP_CONFIG = {
   host:     process.env.FTP_HOST || 'app2-roura-cevasa-com.espacioseguro.com',
-  user:     process.env.FTP_USER || 'ia_rc',
+  user:     process.env.FTP_USER || 'app2roura-cevasa',
   password: process.env.FTP_PASS || 'Roura2026$',
   port:     parseInt(process.env.FTP_PORT) || 21,
   secure:   true,  // FTPS con SSL

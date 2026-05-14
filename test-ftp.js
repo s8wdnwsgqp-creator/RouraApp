@@ -6,7 +6,7 @@ async function testFTP() {
 
   const config = {
     host: 'app2-roura-cevasa-com.espacioseguro.com',
-    user: 'ia_rc',
+    user: 'app2roura-cevasa',
     password: 'Roura2026$',
     port: 21,
     secure: true,
