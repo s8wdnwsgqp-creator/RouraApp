@@ -1,64 +1,68 @@
-/**
- * test-ftp.js — Diagnóstico de conexión FTP
- * Ejecutar con: node test-ftp.js
- */
-const ftp  = require('basic-ftp');
-const XLSX = require('xlsx');
-const { PassThrough } = require('stream');
-
-const EXCEL_FILENAME = 'vw_segplazo_052025.xlsx';
-
-const config = {
-  host:     'app2-roura-cevasa-com.espacioseguro.com',
-  user:     'app2roura-cevasa',
-  password: 'Roura2026$',
-  port:     21,
-  secure:   true,
-  tls:      { rejectUnauthorized: false }
-};
+const ftp = require('basic-ftp');
 
 async function testFTP() {
   const client = new ftp.Client(30000);
   client.ftp.verbose = true;
 
+  const config = {
+    host: 'app2-roura-cevasa-com.espacioseguro.com',
+    user: 'ia_rc',
+    password: 'Roura2026$',
+    port: 21,
+    secure: true,
+    tls: { rejectUnauthorized: false }
+  };
+
   try {
-    console.log('\n🔌 Conectando...');
+    console.log('🔌 Conectando al servidor FTPS...');
     await client.access(config);
-    console.log('✅ Conexión OK');
+    console.log('✅ Conexión exitosa');
 
+    // Ver directorio actual
     const pwd = await client.pwd();
-    console.log('📁 Directorio actual tras conectar:', pwd);
+    console.log('📁 Directorio actual:', pwd);
 
-    console.log('\n📂 Listado del directorio actual:');
-    const list = await client.list();
-    if (list.length === 0) {
-      console.log('  ⚠️  Lista vacía (posible problema de formato MLSD/LIST)');
-    } else {
-      list.forEach(f => console.log(`  ${f.type === 2 ? '📁' : '📄'} ${f.name}`));
+    // Listar contenido del directorio raíz
+    console.log('\n📂 Contenido del directorio raíz:');
+    const rootList = await client.list();
+    rootList.forEach(item => {
+      console.log(`  ${item.type === 2 ? '📁' : '📄'} ${item.name}`);
+    });
+
+    // Intentar entrar en /www
+    console.log('\n🔍 Intentando entrar en /www...');
+    try {
+      await client.cd('/www');
+      const wwwPwd = await client.pwd();
+      console.log('✅ Directorio actual:', wwwPwd);
+
+      const wwwList = await client.list();
+      console.log('📂 Contenido de /www:');
+      wwwList.forEach(item => {
+        console.log(`  ${item.type === 2 ? '📁' : '📄'} ${item.name}`);
+      });
+    } catch (e) {
+      console.log('❌ Error al entrar en /www:', e.message);
     }
 
-    console.log(`\n⬇️  Intentando descargar ${EXCEL_FILENAME} directamente...`);
-    const pt = new PassThrough();
-    const chunks = [];
-    pt.on('data', c => chunks.push(c));
-    const done = new Promise((ok, fail) => { pt.on('end', ok); pt.on('error', fail); });
-    await client.downloadTo(pt, EXCEL_FILENAME);
-    await done;
-    const buffer = Buffer.concat(chunks);
-    console.log(`✅ Descargado: ${buffer.length} bytes`);
-
-    const wb = XLSX.read(buffer, { type: 'buffer' });
-    console.log('📊 Hojas del libro:', wb.SheetNames.join(', '));
-    const sheet = wb.Sheets['DatosX3'];
-    if (sheet) {
-      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-      console.log(`✅ Hoja DatosX3: ${rows.length} filas`);
-    } else {
-      console.log('❌ Hoja DatosX3 no encontrada');
+    // Verificar si existe el archivo Excel
+    console.log('\n🔍 Buscando archivo Excel...');
+    try {
+      await client.cd('/www');
+      const list = await client.list();
+      const excelFiles = list.filter(f => f.name.endsWith('.xlsx'));
+      if (excelFiles.length > 0) {
+        console.log('📊 Archivos Excel encontrados:');
+        excelFiles.forEach(f => console.log(`  - ${f.name}`));
+      } else {
+        console.log('⚠️ No se encontraron archivos .xlsx en /www');
+      }
+    } catch (e) {
+      console.log('❌ Error buscando Excel:', e.message);
     }
 
   } catch (e) {
-    console.error('\n❌ Error:', e.message);
+    console.error('❌ Error FTP:', e.message);
   } finally {
     client.close();
     console.log('\n👋 Conexión cerrada');
