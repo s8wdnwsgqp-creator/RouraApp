@@ -21,7 +21,7 @@ const { PDFDocument: LibPDFDoc } = require('pdf-lib');
 const EXCEL_CACHE_TTL = 5 * 60 * 1000; // 5 minutos
 let _excelCache = null; // { fileName, rows, ts }
 
-async function getExcelRows(ftpConfig, _basePath, _fileName) {  // _basePath y _fileName ignorados: se resuelven dinámicamente
+async function getExcelRows() {
   const now = Date.now();
   if (_excelCache && (now - _excelCache.ts) < EXCEL_CACHE_TTL) {
     console.log('[excel-cache] HIT —', _excelCache.rows.length, 'filas, edad', Math.round((now - _excelCache.ts) / 1000), 's');
@@ -32,24 +32,23 @@ async function getExcelRows(ftpConfig, _basePath, _fileName) {  // _basePath y _
   client.ftp.verbose = false;
   try {
     await ftpConnect(client);
-    // Ir al directorio raíz de trabajo
-    await client.cd(BASE_PATH);
-
-    // Listar y buscar el archivo vw_segplazo*.xlsx excluyendo _PTIN
-    // (el nombre puede cambiar de mes: vw_segplazo_052025.xlsx, vw_segplazo_062025.xlsx, etc.)
+    // Al conectar ya estamos en la raíz del chroot (que es /www físico).
+    // Listar directamente sin ningún cd previo.
     const list = await client.list();
+    console.log('[excel-cache] Archivos en raíz FTP:', list.map(f => f.name).join(', '));
+
+    // Buscar vw_segplazo*.xlsx excluyendo _PTIN
     const excelFile = list.find(f =>
       /^vw_segplazo.*\.xlsx$/i.test(f.name) &&
       !/_ptin/i.test(f.name) &&
-      f.type !== 2  // no es directorio
+      f.type !== 2
     );
     if (!excelFile) {
-      const available = list.filter(f => /\.xlsx$/i.test(f.name)).map(f => f.name).join(', ');
-      throw new Error('No se encontró vw_segplazo*.xlsx (sin _PTIN) en el FTP. Disponibles: ' + (available || 'ninguno'));
+      const available = list.map(f => f.name).join(', ');
+      throw new Error('No se encontró vw_segplazo*.xlsx (sin _PTIN). Contenido del directorio: ' + (available || 'vacío'));
     }
-    console.log('[excel-cache] Archivo encontrado:', excelFile.name);
+    console.log('[excel-cache] Descargando:', excelFile.name);
 
-    // Descargar con solo el nombre (ya estamos en el directorio correcto)
     const pt = new PassThrough();
     const chunks = [];
     pt.on('data', c => chunks.push(c));
@@ -73,36 +72,11 @@ async function getExcelRows(ftpConfig, _basePath, _fileName) {  // _basePath y _
 const JWT_SECRET = process.env.JWT_SECRET || 'roura-cevasa-secret-2025';
 const USERS_FILE   = path.join(__dirname, 'data', 'users.json');
 const CONFIG_FILE  = path.join(__dirname, 'data', 'config.json');
-// BASE_PATH se detecta automáticamente al conectar al FTP.
-// Algunos usuarios FTP tienen chroot en /www (raíz = /www, archivos en /)
-// y otros tienen chroot en / (archivos en /www).
-// resolveFtpBasePath() prueba las dos posibilidades y devuelve la correcta.
-let _ftpBasePath = null;
-
-async function resolveFtpBasePath(client) {
-  // 1. Intentar entrar en /www desde la raíz actual
-  try {
-    await client.cd('/www');
-    return '/www';
-  } catch (_) {}
-  // 2. Si falla, asumir que ya estamos en /www (chroot)
-  try {
-    await client.cd('/');
-    return '/';
-  } catch (_) {}
-  return '/';
-}
-
-async function getBasePath(client) {
-  if (_ftpBasePath !== null) return _ftpBasePath;
-  _ftpBasePath = await resolveFtpBasePath(client);
-  console.log('[ftp] BASE_PATH detectado:', _ftpBasePath);
-  return _ftpBasePath;
-}
-
-// Alias para compatibilidad con el código existente
-// (se sobreescribe en tiempo de ejecución con el valor real)
-let BASE_PATH = process.env.FTP_BASE_PATH || '/www';
+// BASE_PATH: directorio raíz de trabajo en el FTP.
+// El usuario app2roura-cevasa tiene chroot directo en /www,
+// por lo que al conectar ya está en '/' (que físicamente es /www).
+// No se hace ningún cd adicional — los archivos están en la raíz de conexión.
+const BASE_PATH = '/';
 
 // ── Timestamp en formato yyyymmdd_hhmmss para nombres de archivo ──────────
 function tsNombre(userId) {
@@ -428,27 +402,13 @@ function crearZipBuffer(entries) {
 // ftpConnect() detecta la raíz real y actualiza BASE_PATH globalmente.
 
 /**
- * Conecta al FTP, detecta la raíz real y actualiza BASE_PATH.
- * Usar en lugar de client.access(FTP_CONFIG) en todos los endpoints.
+ * Conecta al FTP.
+ * El usuario app2roura-cevasa tiene chroot en /www:
+ * al conectar ya está en '/' (que físicamente es /www).
+ * BASE_PATH = '/' — no se hace ningún cd de detección.
  */
 async function ftpConnect(client) {
   await client.access(FTP_CONFIG);
-  const pwd = await client.pwd();
-  // Si la raíz del servidor es ya el directorio de trabajo (chroot en /www),
-  // /www no existirá como subdirectorio — usamos '/' como base.
-  // Si /www existe como subdirectorio, lo usamos como base.
-  if (_ftpBasePath === null) {
-    try {
-      await client.cd('/www');
-      _ftpBasePath = '/www';
-    } catch (_) {
-      _ftpBasePath = '/';
-    }
-    // Volver a la raíz tras la detección
-    try { await client.cd('/'); } catch (_) {}
-    console.log('[ftp] Raíz detectada:', _ftpBasePath, '(pwd inicial:', pwd + ')');
-    BASE_PATH = _ftpBasePath;
-  }
 }
 
 /**
@@ -1041,11 +1001,9 @@ app.get('/api/buscar-pedido', requireAuth, async (req, res) => {
   const numeroPedido = (req.query.pedido || '').trim();
   if (!numeroPedido) return res.status(400).json({ success: false, error: 'Falta número de pedido' });
 
-  const EXCEL_FILE = 'vw_segplazo_052025.xlsx';
-
   try {
     // Usa caché — solo descarga del FTP si han pasado más de 5 min o es la primera vez
-    const rows = await getExcelRows(FTP_CONFIG, BASE_PATH, EXCEL_FILE);
+    const rows = await getExcelRows();
 
     let found = null;
     for (let i = 1; i < rows.length; i++) {
@@ -2810,9 +2768,8 @@ app.post('/api/config/proforma', requireAuth, (req, res) => {
 // GET /api/sies-disponibles — lista SIEs únicos del Excel vw_segplazo (no vacíos)
 // Para poblar el selector de la pantalla de configuración
 app.get('/api/sies-disponibles', requireAuth, async (req, res) => {
-  const EXCEL_FILE = 'vw_segplazo_052025.xlsx';
   try {
-    const rows = await getExcelRows(FTP_CONFIG, BASE_PATH, EXCEL_FILE);
+    const rows = await getExcelRows();
     const siesSet = new Set();
     for (let i = 1; i < rows.length; i++) {
       const sie = String(rows[i][1] || '').trim();  // Columna B = SIE
