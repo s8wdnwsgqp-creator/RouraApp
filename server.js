@@ -21,32 +21,48 @@ const { PDFDocument: LibPDFDoc } = require('pdf-lib');
 const EXCEL_CACHE_TTL = 5 * 60 * 1000; // 5 minutos
 let _excelCache = null; // { fileName, rows, ts }
 
-async function getExcelRows(ftpConfig, _basePath, fileName) {  // _basePath ignorado: se usa BASE_PATH dinámico
+async function getExcelRows(ftpConfig, _basePath, _fileName) {  // _basePath y _fileName ignorados: se resuelven dinámicamente
   const now = Date.now();
-  if (_excelCache && _excelCache.fileName === fileName && (now - _excelCache.ts) < EXCEL_CACHE_TTL) {
+  if (_excelCache && (now - _excelCache.ts) < EXCEL_CACHE_TTL) {
     console.log('[excel-cache] HIT —', _excelCache.rows.length, 'filas, edad', Math.round((now - _excelCache.ts) / 1000), 's');
     return _excelCache.rows;
   }
-  console.log('[excel-cache] MISS — descargando', fileName, '...');
+  console.log('[excel-cache] MISS — buscando Excel en FTP...');
   const client = new ftp.Client(120000);
   client.ftp.verbose = false;
   try {
     await ftpConnect(client);
-    // Tras ftpConnect, BASE_PATH es correcto. Ir al directorio y descargar solo con nombre.
+    // Ir al directorio raíz de trabajo
     await client.cd(BASE_PATH);
+
+    // Listar y buscar el archivo vw_segplazo*.xlsx excluyendo _PTIN
+    // (el nombre puede cambiar de mes: vw_segplazo_052025.xlsx, vw_segplazo_062025.xlsx, etc.)
+    const list = await client.list();
+    const excelFile = list.find(f =>
+      /^vw_segplazo.*\.xlsx$/i.test(f.name) &&
+      !/_ptin/i.test(f.name) &&
+      f.type !== 2  // no es directorio
+    );
+    if (!excelFile) {
+      const available = list.filter(f => /\.xlsx$/i.test(f.name)).map(f => f.name).join(', ');
+      throw new Error('No se encontró vw_segplazo*.xlsx (sin _PTIN) en el FTP. Disponibles: ' + (available || 'ninguno'));
+    }
+    console.log('[excel-cache] Archivo encontrado:', excelFile.name);
+
+    // Descargar con solo el nombre (ya estamos en el directorio correcto)
     const pt = new PassThrough();
     const chunks = [];
     pt.on('data', c => chunks.push(c));
     const done = new Promise((ok, fail) => { pt.on('end', ok); pt.on('error', fail); });
-    await client.downloadTo(pt, fileName);
+    await client.downloadTo(pt, excelFile.name);
     await done;
     const buffer = Buffer.concat(chunks);
     const workbook = XLSX.read(buffer, { type: 'buffer' });
     const sheet = workbook.Sheets['DatosX3'];
-    if (!sheet) throw new Error('No se encontró la hoja DatosX3');
+    if (!sheet) throw new Error('No se encontró la hoja DatosX3 en ' + excelFile.name);
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-    _excelCache = { fileName, rows, ts: Date.now() };
-    console.log('[excel-cache] Cargado —', rows.length, 'filas');
+    _excelCache = { fileName: excelFile.name, rows, ts: Date.now() };
+    console.log('[excel-cache] Cargado —', rows.length, 'filas desde', excelFile.name);
     return rows;
   } finally {
     client.close();
